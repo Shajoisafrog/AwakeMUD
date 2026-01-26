@@ -8,7 +8,7 @@ specific_folks = {
   "Production Staff": {
     "Coder": ["Lucien"],
     "Heads of Staff": ["Vile", "Jank"],
-    "Helpers / Facilitators": ["Jexams", "Alak"],
+    "Helpers / Facilitators": ["Jexams", "Alak", "Valence"],
   },
   "Buildport Staff": {
     "Head Builder": ["Vile (as Wither)"],
