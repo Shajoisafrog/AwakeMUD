@@ -63,23 +63,13 @@ void pedit_disp_program_menu(struct descriptor_data *d)
 
   strncpy(buf, "", sizeof(buf) - 1);
 
-  bool screenreader_mode = PRF_FLAGGED(d->character, PRF_SCREENREADER);
-  for (int counter = 1; counter < NUM_PROGRAMS; counter++)
-  {
-    if (screenreader_mode)
-      send_to_char(d->character, "%d) %s\r\n", counter, programs[counter].name);
-    else {
-      snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "%s%2d) %-22s%s",
-              counter % 3 == 1 ? "  " : "",
-              counter,
-              programs[counter].name,
-              counter % 3 == 0 ? "\r\n" : "");
-    }
+  for (int counter = 1; counter < NUM_PROGRAMS; counter++) {
+    send_to_char(d->character, "%d) %s%s\r\n", counter, programs[counter].name, programs[counter].nerps ? "  (not implemented)" : "");
   }
-  if (!screenreader_mode)
-    send_to_char(d->character, "%s\r\nSelect program type: ", buf);
+  send_to_char(d->character, "\r\nSelect program type: ");
   d->edit_mode = PEDIT_TYPE;
 }
+
 void pedit_parse(struct descriptor_data *d, const char *arg)
 {
   int number = atoi(arg);
@@ -97,7 +87,10 @@ void pedit_parse(struct descriptor_data *d, const char *arg)
     case '3':
       if (!GET_DESIGN_PROGRAM(d->edit_obj))
         send_to_char("Choose a program type first!\r\n", CH);
-      else {
+      else if (GET_DESIGN_PROGRAM(d->edit_obj) == SOFT_EVALUATE && !GET_SKILL(CH, SKILL_DATA_BROKERAGE)) {
+        send_to_char("You need to know Data Brokerage to create Evaluate programs.\r\n", CH);
+        GET_DESIGN_PROGRAM(d->edit_obj) = 0;
+      } else {
         send_to_char("Enter Rating: ", CH);
         d->edit_mode = PEDIT_RATING;
       }
@@ -197,7 +190,9 @@ void pedit_parse(struct descriptor_data *d, const char *arg)
   case PEDIT_TYPE:
     if (number < 1 || number >= NUM_PROGRAMS)
       send_to_char(CH, "Not a valid option!\r\nEnter your choice: ");
-    else {
+    else if (number == SOFT_EVALUATE && !GET_SKILL(CH, SKILL_DATA_BROKERAGE)) {
+      send_to_char("You need to know Data Brokerage to create Evaluate programs.\r\nEnter your choice: ", CH);
+    } else {
       GET_DESIGN_PROGRAM(d->edit_obj) = number;
       GET_DESIGN_RATING(d->edit_obj) = 1;
 
@@ -269,6 +264,11 @@ int get_program_skill(char_data *ch, obj_data *prog, int target)
     break;
   case SOFT_ATTACK:
   case SOFT_SLOW:
+  case SOFT_BLACK_HAMMER:
+  case SOFT_EROSION:
+  case SOFT_HOG:
+  case SOFT_KILLJOY:
+  case SOFT_STEAMROLLER:
     skill = get_skill(ch, SKILL_PROGRAM_COMBAT, target);
     break;
   case SOFT_CLOAK:
@@ -276,6 +276,7 @@ int get_program_skill(char_data *ch, obj_data *prog, int target)
   case SOFT_MEDIC:
   case SOFT_ARMOR:
   case SOFT_SHIELD:
+  case SOFT_RESTORE:
     skill = get_skill(ch, SKILL_PROGRAM_DEFENSIVE, target);
     break;
   case SOFT_BATTLETEC:
@@ -284,6 +285,9 @@ int get_program_skill(char_data *ch, obj_data *prog, int target)
   case SOFT_TRACK:
   case SOFT_SUITE:
   case SOFT_RADIO:
+  case SOFT_COUNTERFEIT:
+  case SOFT_GUARDIAN:
+  case SOFT_REMOTE_CONTROL:
     skill = get_skill(ch, SKILL_PROGRAM_SPECIAL, target);
     break;
   case SOFT_CAMO:
@@ -301,6 +305,12 @@ int get_program_skill(char_data *ch, obj_data *prog, int target)
   case SOFT_BROWSE:
   case SOFT_READ:
   case SOFT_COMMLINK:
+  case SOFT_DOORSTOP:
+  case SOFT_MIRRORS:
+  case SOFT_PURGE:
+  case SOFT_REDECORATE:
+  case SOFT_SPOOF:
+  case SOFT_TRIANGULATION:
     skill = get_skill(ch, SKILL_PROGRAM_OPERATIONAL, target);
     break;
   default:

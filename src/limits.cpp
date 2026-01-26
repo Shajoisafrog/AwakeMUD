@@ -139,8 +139,16 @@ void mental_gain(struct char_data * ch)
     if (char_is_in_social_room(ch))
       gain *= 2;
 
-    if (ch->in_room && ROOM_FLAGGED(ch->in_room, ROOM_STERILE))
-      gain *= 1.5;
+    if (ROOM_FLAGGED(ch->in_room, ROOM_STERILE)) {
+      if (GET_APARTMENT(ch->in_room)) {
+        // To get the benefit, the apartment must be owned with a valid lease, and you must be the owner or a guest.
+        if (GET_APARTMENT(ch->in_room)->is_owner_or_guest_with_valid_lease(ch)) {
+          gain *= 1.5;
+        }
+      } else {
+        gain *= 1.5;
+      }
+    }
 
     // Penalties happen last, to avoid the possibility of truncating to zero too early
     if (PLR_FLAGS(ch).IsSet(PLR_ENABLED_DRUGS)) {
@@ -248,8 +256,16 @@ void physical_gain(struct char_data * ch)
     if (char_is_in_social_room(ch))
       gain *= 2;
 
-    if (ch->in_room && ROOM_FLAGGED(ch->in_room, ROOM_STERILE))
-      gain *= 1.8;
+    if (ROOM_FLAGGED(ch->in_room, ROOM_STERILE)) {
+      if (GET_APARTMENT(ch->in_room)) {
+        // To get the benefit, the apartment must be owned with a valid lease, and you must be the owner or a guest.
+        if (GET_APARTMENT(ch->in_room)->is_owner_or_guest_with_valid_lease(ch)) {
+          gain *= 1.8;
+        }
+      } else {
+        gain *= 1.8;
+      }
+    }
 
     // Penalties happen last, to avoid the possibility of truncating to zero too early
     if (PLR_FLAGS(ch).IsSet(PLR_ENABLED_DRUGS)) {
@@ -772,9 +788,9 @@ bool check_bioware(struct char_data *ch)
 }
 
 int calculate_swim_successes(struct char_data *ch) {
-  int swim_test_target, skill_dice, opposing_dice, successes, water_wings_bonus = 0, fin_bonus = 0;
+  int swim_test_target, skill_dice, opposing_dice, successes, water_wings_bonus = 0, levitate_bonus = 0, fin_bonus = 0;
 
-  if (IS_NPC(ch) || IS_SENATOR(ch) || IS_AFFECTED(ch, AFF_LEVITATE) || !ch->in_room)
+  if (IS_NPC(ch) || IS_SENATOR(ch) || !ch->in_room)
     return 20;
 
   for (int x = WEAR_LIGHT; x < NUM_WEARS; x++)
@@ -796,18 +812,26 @@ int calculate_swim_successes(struct char_data *ch) {
   else
     skill_dice = get_skill(ch, SKILL_ATHLETICS, swim_test_target);
 
+  snprintf(buf, sizeof(buf), "%s rolled %d", GET_CHAR_NAME(ch), skill_dice);
+
+  // Levitate always applies.
+  if ((levitate_bonus = affected_by_spell(ch, SPELL_LEVITATE))) {
+    skill_dice += levitate_bonus;
+    snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), " + %d (levitate)", levitate_bonus);
+  }
+
   // Fins only matter if you're conscious and able to use them.
-  if (GET_POS(ch) >= POS_RESTING)
+  if (fin_bonus && GET_POS(ch) >= POS_RESTING) {
     skill_dice += fin_bonus;
+    snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), " + %d (fins)", fin_bonus);
+  }
 
   opposing_dice = MAX(2, ch->in_room->rating);
 
   successes = success_test(skill_dice, swim_test_target);
   successes -= success_test(opposing_dice, skill_dice);
 
-  snprintf(buf, sizeof(buf), "%s rolled %d dice against TN %d (lowered from %d by WW %d), opposed by %d dice at TN %d: %d net success%s.\r\n",
-           GET_CHAR_NAME(ch),
-           skill_dice,
+  snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), " dice against TN %d (lowered from %d by WW %d), opposed by %d dice at TN %d: %d net success%s.\r\n",
            swim_test_target,
            swim_test_target + water_wings_bonus,
            water_wings_bonus,

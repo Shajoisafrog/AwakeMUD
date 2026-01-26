@@ -884,6 +884,12 @@ void game_loop(int mother_desc)
       for (d = descriptor_list; d; d = next_d) {
         next_d = d->next;
 
+#ifdef HURT_ME_WITH_THE_WAIT_SPAM_MESSAGES
+        if (d->wait > 0 && d->character && GET_LEVEL(d->character) == LVL_PRESIDENT && PRF_FLAGGED(d->character, PRF_ROLLS)) {
+          send_to_char(d->character, "^L[wait: %d]\r\n", d->wait);
+        }
+#endif
+
         if ((--(d->wait) <= 0) && get_from_q(&d->input, comm, sizeof(comm), &aliased)) {
           if (d->character) {
             d->character->char_specials.last_timer = d->character->char_specials.timer;
@@ -1457,28 +1463,53 @@ int make_prompt(struct descriptor_data * d)
               break;
             case 'A':
               if (GET_EQ(d->character, WEAR_WIELD)) {
-
-                if (WEAPON_IS_GUN(GET_EQ(d->character, WEAR_WIELD)))
-                  switch (GET_OBJ_VAL(GET_EQ(d->character, WEAR_WIELD), 11)) {
+                if (WEAPON_IS_GUN(GET_EQ(d->character, WEAR_WIELD))) {
+                  switch (GET_WEAPON_FIREMODE(GET_EQ(d->character, WEAR_WIELD))) {
                     case MODE_SS:
-                      snprintf(str, sizeof(str), "SS");
+                      strlcat(str, "SS", sizeof(str));
                       break;
                     case MODE_SA:
-                      snprintf(str, sizeof(str), "SA");
+                      strlcat(str, "SA", sizeof(str));
                       break;
                     case MODE_BF:
-                      snprintf(str, sizeof(str), "BF");
+                      strlcat(str, "BF", sizeof(str));
                       break;
                     case MODE_FA:
                       snprintf(str, sizeof(str), "FA(%d)", GET_OBJ_TIMER(GET_EQ(d->character, WEAR_WIELD)));
                       break;
                     default:
-                      snprintf(str, sizeof(str), "NA");
+                      strlcat(str, "NA", sizeof(str));
+                      break;
                   }
-                else strlcpy(str, "ML", sizeof(str));
+                }
+                else {
+                  strlcpy(str, "ML", sizeof(str));
+                }
+              } else {
+                // Check for a usable cyberweapon.
+                bool has_cyberweapon = FALSE;
+                for (struct obj_data *ware = d->character->cyberware; !has_cyberweapon && ware; ware = ware->next_content) {
+                  switch (GET_CYBERWARE_TYPE(ware)) {
+                    case CYB_CLIMBINGCLAWS:
+                    case CYB_FIN:
+                    case CYB_HANDBLADE:
+                    case CYB_HANDRAZOR:
+                    case CYB_HANDSPUR:
+                    case CYB_FOOTANCHOR:
+                    case CYB_FANGS:
+                    case CYB_HORNS:
+                      if (!GET_CYBERWARE_IS_DISABLED(ware))
+                        has_cyberweapon = TRUE;
+                      break;
+                  }
+                }
 
-              } else
-                strlcpy(str, "N/A", sizeof(str));
+                if (has_cyberweapon) {
+                  strlcpy(str, "CY", sizeof(str));
+                } else {
+                  strlcpy(str, "N/A", sizeof(str));
+                }
+              }
               break;
             case 'b':       // ballistic
               snprintf(str, sizeof(str), "%d", GET_BALLISTIC(d->character));
@@ -2425,11 +2456,22 @@ int perform_subst(struct descriptor_data *t, char *orig, char *subst, size_t sub
 void free_editing_structs(descriptor_data *d, int state)
 {
   if (d->edit_obj) {
-    if (d->connected == CON_PART_CREATE || d->connected == CON_AMMO_CREATE || d->connected == CON_SPELL_CREATE
-        || (d->connected >= CON_PRO_CREATE && d->connected <= CON_DECK_CREATE))
+    // You need to add something to this top block IFF you use read_object() to create the editing prototype.
+    if (d->connected == CON_PART_CREATE
+        || d->connected == CON_AMMO_CREATE
+        || d->connected == CON_SPELL_CREATE
+        || d->connected == CON_PRO_CREATE
+        || d->connected == CON_DECK_CREATE
+        || d->connected == CON_ART_CREATE
+        || d->connected == CON_PET_CREATE
+        || d->connected == CON_CF_CREATE)
+    {
       extract_obj(d->edit_obj);
-    else
-      Mem->DeleteObject(d->edit_obj);
+    }
+    // Anything falling through to here MUST have been created with direct memory creation (e.g. Mem->GetObject(), hopefully not 'new') 
+    else {
+      Mem->DeleteObject(d->edit_obj, "comm.cpp's raw editing struct deletion");
+    }
     d->edit_obj = NULL;
   }
 
@@ -2889,6 +2931,20 @@ void send_to_char(const char *messg, struct char_data *ch)
 {
   if (ch && ch->desc && messg)
     SEND_TO_Q(messg, ch->desc);
+}
+
+void send_to_icon(const char * const messg, struct matrix_icon * icon)
+{
+  if (!icon || !icon->decker || !icon->decker->ch || !icon->decker->ch->desc || !messg) {
+#ifdef DEBUG_SEND_TO_ICON
+    log_vfprintf("send_to_icon '%s' failing: no valid target or messg", messg);
+#endif
+    return;
+  }
+
+  SEND_TO_Q(messg, icon->decker->ch->desc);
+  if (icon->decker->hitcher && icon->decker->hitcher->desc)
+    SEND_TO_Q(messg, icon->decker->hitcher->desc);
 }
 
 void send_to_icon(struct matrix_icon * icon, const char * const messg, ...)

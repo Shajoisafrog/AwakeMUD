@@ -1314,10 +1314,27 @@ void do_stat_room(struct char_data * ch)
         strlcpy(buf1, " ^cNONE^n", sizeof(buf1));
       else
         snprintf(buf1, sizeof(buf1), "^c%8ld^n", rm->dir_option[i]->to_room->number);
+
+      char last_opened_string[100] = {0};
+      if (rm->dir_option[i]->last_player_interaction) {
+        time_t last_opened = time(0) - rm->dir_option[i]->last_player_interaction;
+        if (last_opened > 9999) {
+          strlcpy(last_opened_string, "a bit", sizeof(last_opened_string));
+        } else {
+          snprintf(last_opened_string, sizeof(last_opened_string), "%4lds", last_opened);
+        }
+      } else {
+        strlcpy(last_opened_string, "never", sizeof(last_opened_string));
+      }
+
       sprintbit(rm->dir_option[i]->exit_info, exit_bits, buf2, sizeof(buf2));
-      snprintf(buf, sizeof(buf), "Exit ^c%-5s^n:  To: [^c%s^n], Key: [^c%8ld^n], Keyword: "
-              "^c%s^n, Type: ^c%s^n\r\n ", dirs[i], buf1, rm->dir_option[i]->key,
-              rm->dir_option[i]->keyword ? rm->dir_option[i]->keyword : "None", buf2);
+      snprintf(buf, sizeof(buf), "Exit ^c%-5s^n:  To: [^c%s^n], Key: [^c%8ld^n], Last: [^c%s^n], Keyword: ^c%s^n, Type: ^c%s^n\r\n ",
+              dirs[i],
+              buf1,
+              rm->dir_option[i]->key,
+              last_opened_string,
+              rm->dir_option[i]->keyword ? rm->dir_option[i]->keyword : "None",
+              buf2);
       send_to_char(buf, ch);
       if (rm->dir_option[i]->general_description)
         strlcpy(buf, rm->dir_option[i]->general_description, sizeof(buf));
@@ -4761,6 +4778,7 @@ ACMD(do_show)
                { "affflag",         LVL_BUILDER },
                { "mobflag",         LVL_BUILDER },
                { "finishedzones",   LVL_BUILDER },
+               { "uppies",          LVL_ADMIN },
                { "\n", 0 }
              };
 
@@ -5818,6 +5836,36 @@ ACMD(do_show)
     }
     page_string(ch->desc, buf, 1);
     return;
+  case 41:
+    strlcpy(buf, "Rooms with TNs set\r\n------------\r\n", sizeof(buf));
+    for (i = 0, k = 0; i <= top_of_world; i++) {
+      if (!world[i].rating)
+        continue;
+      
+      // Skip staff rooms.
+      if (world[i].number <= 100 || (world[i].number >= 10000 && world[i].number <= 10099))
+        continue;
+      
+      if (IS_WATER(&world[i]) || world[i].room_flags.AreAnySet(ROOM_FALL, ROOM_RADIATION, ENDBIT)) {
+        // Skip standard elevator shafts.
+        if (world[i].room_flags.IsSet(ROOM_ELEVATOR_SHAFT) && world[i].rating == 6)
+          continue;
+
+        snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "%3d: [%8ld] %s (rating %s%d^n%s%s%s^n)\r\n",
+                  ++k,
+                  world[i].number,
+                  world[i].name,
+                  world[i].rating > 18 ? "^r" : (world[i].rating > 10 ? "^y" : "^C"),
+                  world[i].rating,
+                  world[i].room_flags.IsSet(ROOM_FALL) ? ", ^cfall^n" : "",
+                  world[i].room_flags.IsSet(ROOM_RADIATION) ? ", ^cradiation^n" : "",
+                  IS_WATER(&world[i]) ? ", ^cflooded^n" : ""
+                );
+        last = i;
+      }
+    }
+    page_string(ch->desc, buf, 1);
+    break;
   default:
     send_to_char("Sorry, I don't understand that.\r\n", ch);
     break;
@@ -6009,6 +6057,7 @@ ACMD(do_set)
                { "highestindex", LVL_ADMIN, BOTH, NUMBER },
                { "strikes", LVL_FIXER, PC, NUMBER },
                { "scrutiny", LVL_ADMIN, PC, BINARY }, // 90
+               { "otakupath", LVL_ADMIN, PC, NUMBER },
                { "\n", 0, BOTH, MISC }
              };
 
@@ -6316,12 +6365,12 @@ ACMD(do_set)
   case 28: // thirst
     if (!str_cmp(val_arg, "off")) {
       GET_COND(vict, (l - 26)) = (char) -1;
-      snprintf(buf, sizeof(buf), "%s's %s now off.", GET_NAME(vict), fields[l].cmd);
+      snprintf(buf, sizeof(buf), "%s's %s now off.", GET_CHAR_NAME(vict), fields[l].cmd);
     } else if (is_number(val_arg)) {
       value = atoi(val_arg);
       RANGE(0, 24);
       GET_COND(vict, (l - 26)) = (char) value;
-      snprintf(buf, sizeof(buf), "%s's %s set to %d.", GET_NAME(vict), fields[l].cmd, value);
+      snprintf(buf, sizeof(buf), "%s's %s set to %d.", GET_CHAR_NAME(vict), fields[l].cmd, value);
     } else {
       send_to_char("Must be 'off' or a value from 0 to 24.\r\n", ch);
 
@@ -6377,7 +6426,7 @@ ACMD(do_set)
       value = atoi(val_arg);
       if (real_room(value) != NOWHERE) {
         GET_LOADROOM(vict) = value;
-        snprintf(buf, sizeof(buf), "%s will enter at room #%ld.", GET_NAME(vict), GET_LOADROOM(vict));
+        snprintf(buf, sizeof(buf), "%s will enter at room #%ld.", GET_CHAR_NAME(vict), GET_LOADROOM(vict));
       } else
         snprintf(buf, sizeof(buf), "That room does not exist!");
     } else
@@ -6524,7 +6573,7 @@ ACMD(do_set)
     break;
   case 56: /* nosnoop flag */
     SET_OR_REMOVE(PLR_FLAGS(vict), PLR_NOSNOOP);
-    snprintf(buf, sizeof(buf),"%s changed %s's !SNOOP flag setting.",GET_CHAR_NAME(ch),GET_NAME(vict));
+    snprintf(buf, sizeof(buf),"%s changed %s's !SNOOP flag setting.",GET_CHAR_NAME(ch),GET_CHAR_NAME(vict));
     mudlog(buf, ch, LOG_WIZLOG, TRUE );
     break;
   case 57:
@@ -6627,36 +6676,36 @@ ACMD(do_set)
     break;
   case 74: /* rolls for morts */
     SET_OR_REMOVE(PRF_FLAGS(vict), PRF_ROLLS);
-    snprintf(buf, sizeof(buf),"%s changed %s's rolls flag setting.", GET_CHAR_NAME(ch), GET_NAME(vict));
+    snprintf(buf, sizeof(buf),"%s changed %s's rolls flag setting.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict));
     mudlog(buf, ch, LOG_WIZLOG, TRUE );
     break;
   case 75: /* multiplier */
     RANGE(0, 10000);
     GET_CHAR_MULTIPLIER(vict) = value;
-    snprintf(buf, sizeof(buf),"%s changed %s's multiplier to %.2f.", GET_CHAR_NAME(ch), GET_NAME(vict), (float) GET_CHAR_MULTIPLIER(vict) / 100);
+    snprintf(buf, sizeof(buf),"%s changed %s's multiplier to %.2f.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), (float) GET_CHAR_MULTIPLIER(vict) / 100);
     mudlog(buf, ch, LOG_WIZLOG, TRUE );
     break;
   case 76: /* shotsfired */
     RANGE(0, 50000);
     SHOTS_FIRED(vict) = value;
-    snprintf(buf, sizeof(buf),"%s changed %s's shots_fired to %d.", GET_CHAR_NAME(ch), GET_NAME(vict), value);
+    snprintf(buf, sizeof(buf),"%s changed %s's shots_fired to %d.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), value);
     mudlog(buf, ch, LOG_WIZLOG, TRUE );
     break;
   case 77: /* shotstriggered */
     RANGE(-1, 100);
     SHOTS_TRIGGERED(vict) = value;
-    snprintf(buf, sizeof(buf),"%s changed %s's shots_triggered to %d.", GET_CHAR_NAME(ch), GET_NAME(vict), value);
+    snprintf(buf, sizeof(buf),"%s changed %s's shots_triggered to %d.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), value);
     mudlog(buf, ch, LOG_WIZLOG, TRUE );
     break;
   case 78: /* powerpoints */
     RANGE(-10000, 10000);
     GET_PP(vict) = value;
-    snprintf(buf, sizeof(buf),"%s changed %s's powerpoints to %d.", GET_CHAR_NAME(ch), GET_NAME(vict), value);
+    snprintf(buf, sizeof(buf),"%s changed %s's powerpoints to %d.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), value);
     mudlog(buf, ch, LOG_WIZLOG, TRUE );
     break;
   case 79: /* cyberdoc permission */
     SET_OR_REMOVE(PLR_FLAGS(vict), PLR_CYBERDOC);
-    snprintf(buf, sizeof(buf),"%s turned %s's cyberdoc flag %s.", GET_CHAR_NAME(ch), GET_NAME(vict), PLR_FLAGGED(vict, PLR_CYBERDOC) ? "ON" : "OFF");
+    snprintf(buf, sizeof(buf),"%s turned %s's cyberdoc flag %s.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), PLR_FLAGGED(vict, PLR_CYBERDOC) ? "ON" : "OFF");
     mudlog(buf, ch, LOG_WIZLOG, TRUE );
     break;
   case 80: /* hardcore */
@@ -6666,38 +6715,38 @@ ACMD(do_set)
       turn_hardcore_on_for_character(vict);
     }
 
-    snprintf(buf, sizeof(buf),"%s turned %s's hardcore and nodelete flags %s.", GET_CHAR_NAME(ch), GET_NAME(vict), PRF_FLAGGED(vict, PRF_HARDCORE) ? "ON" : "OFF");
+    snprintf(buf, sizeof(buf),"%s turned %s's hardcore and nodelete flags %s.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), PRF_FLAGGED(vict, PRF_HARDCORE) ? "ON" : "OFF");
     mudlog(buf, ch, LOG_WIZLOG, TRUE );
     break;
   case 81: /* esshole */
     RANGE(0, GET_RACIAL_STARTING_ESSENCE_FOR_RACE(GET_RACE(vict)));
-    snprintf(buf, sizeof(buf),"%s changed %s's esshole from %d to %d.", GET_CHAR_NAME(ch), GET_NAME(vict), GET_ESSHOLE(vict), value);
+    snprintf(buf, sizeof(buf),"%s changed %s's esshole from %d to %d.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), GET_ESSHOLE(vict), value);
     GET_ESSHOLE(vict) = value;
     mudlog(buf, ch, LOG_WIZLOG, TRUE );
     break;
   case 82: /* no syspoint auto awards */
     SET_OR_REMOVE(PLR_FLAGS(vict), PLR_NO_AUTO_SYSP_AWARDS);
-    snprintf(buf, sizeof(buf),"%s turned %s's no-auto-sysp-awards flag %s.", GET_CHAR_NAME(ch), GET_NAME(vict), PLR_FLAGGED(vict, PLR_NO_AUTO_SYSP_AWARDS) ? "ON" : "OFF");
+    snprintf(buf, sizeof(buf),"%s turned %s's no-auto-sysp-awards flag %s.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), PLR_FLAGGED(vict, PLR_NO_AUTO_SYSP_AWARDS) ? "ON" : "OFF");
     mudlog(buf, ch, LOG_WIZLOG, TRUE);
     break;
   case 83: /* no tells */
     SET_OR_REMOVE(PLR_FLAGS(vict), PLR_TELLS_MUTED);
-    snprintf(buf, sizeof(buf),"%s turned %s's no-tells flag %s.", GET_CHAR_NAME(ch), GET_NAME(vict), PLR_FLAGGED(vict, PLR_TELLS_MUTED) ? "ON" : "OFF");
+    snprintf(buf, sizeof(buf),"%s turned %s's no-tells flag %s.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), PLR_FLAGGED(vict, PLR_TELLS_MUTED) ? "ON" : "OFF");
     mudlog(buf, ch, LOG_WIZLOG, TRUE);
     break;
   case 84: /* no ooc */
     SET_OR_REMOVE(PLR_FLAGS(vict), PLR_NOOOC);
-    snprintf(buf, sizeof(buf),"%s turned %s's no-ooc flag %s.", GET_CHAR_NAME(ch), GET_NAME(vict), PLR_FLAGGED(vict, PLR_NOOOC) ? "ON" : "OFF");
+    snprintf(buf, sizeof(buf),"%s turned %s's no-ooc flag %s.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), PLR_FLAGGED(vict, PLR_NOOOC) ? "ON" : "OFF");
     mudlog(buf, ch, LOG_WIZLOG, TRUE);
     break;
   case 85: /* no radio */
     SET_OR_REMOVE(PLR_FLAGS(vict), PLR_RADIO_MUTED);
-    snprintf(buf, sizeof(buf),"%s turned %s's no-radio flag %s.", GET_CHAR_NAME(ch), GET_NAME(vict), PLR_FLAGGED(vict, PLR_RADIO_MUTED) ? "ON" : "OFF");
+    snprintf(buf, sizeof(buf),"%s turned %s's no-radio flag %s.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), PLR_FLAGGED(vict, PLR_RADIO_MUTED) ? "ON" : "OFF");
     mudlog(buf, ch, LOG_WIZLOG, TRUE);
     break;
   case 86: /* site hidden */
     SET_OR_REMOVE(PLR_FLAGS(vict), PLR_SITE_HIDDEN);
-    log_vfprintf("CHEATLOG: %s turned %s's site-hidden flag %s.", GET_CHAR_NAME(ch), GET_NAME(vict), PLR_FLAGGED(vict, PLR_SITE_HIDDEN) ? "ON" : "OFF");
+    log_vfprintf("CHEATLOG: %s turned %s's site-hidden flag %s.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), PLR_FLAGGED(vict, PLR_SITE_HIDDEN) ? "ON" : "OFF");
     break;
   case 87: /* lifestyle string */
     if (is_file) {
@@ -6711,7 +6760,7 @@ ACMD(do_set)
     break;
   case 88: /* highestindex */
     RANGE(0, 900);
-    snprintf(buf, sizeof(buf),"%s changed %s's highest bioware index from %d to %d.", GET_CHAR_NAME(ch), GET_NAME(vict), GET_HIGHEST_INDEX(vict), value);
+    snprintf(buf, sizeof(buf),"%s changed %s's highest bioware index from %d to %d.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), GET_HIGHEST_INDEX(vict), value);
     GET_HIGHEST_INDEX(vict) = value;
     mudlog(buf, ch, LOG_WIZLOG, TRUE );
   case 89: /* strikes */
@@ -6719,12 +6768,24 @@ ACMD(do_set)
       RANGE(0, 3);
       int old_val = GET_AUTOMOD_COUNTER(vict);
       GET_SETTABLE_AUTOMOD_COUNTER(vict) = value;
-      mudlog_vfprintf(ch, LOG_WIZLOG, "%s changed %s's auto-moderator strikes from %d to %d.", GET_CHAR_NAME(ch), GET_NAME(vict), old_val, value);
+      mudlog_vfprintf(ch, LOG_WIZLOG, "%s changed %s's auto-moderator strikes from %d to %d.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), old_val, value);
     }
     break;
   case 90: /* suspicious flag */
     SET_OR_REMOVE(PLR_FLAGS(vict), PLR_ADDITIONAL_SCRUTINY);
-    mudlog_vfprintf(ch, LOG_WIZLOG, "%s changed %s's staff-scrutiny flag setting to %s.", GET_CHAR_NAME(ch), GET_NAME(vict), PLR_FLAGGED(vict, PLR_ADDITIONAL_SCRUTINY) ? "TRUE" : "FALSE");
+    mudlog_vfprintf(ch, LOG_WIZLOG, "%s changed %s's staff-scrutiny flag setting to %s.", GET_CHAR_NAME(ch), GET_CHAR_NAME(vict), PLR_FLAGGED(vict, PLR_ADDITIONAL_SCRUTINY) ? "TRUE" : "FALSE");
+    break;
+  case 91: /* otaku path */
+    {
+      RANGE(0, MAX_OTAKU_PATH);
+      int old_val = GET_OTAKU_PATH(vict);
+      GET_OTAKU_PATH(vict) = value;
+      mudlog_vfprintf(ch, LOG_WIZLOG, "%s changed %s's otaku path from %s to %s.",
+                      GET_CHAR_NAME(ch),
+                      GET_CHAR_NAME(vict),
+                      old_val == OTAKU_PATH_NORMIE ? "Normie" : (old_val == OTAKU_PATH_CYBERADEPT ? "Cyberadept Otaku" : "Technoshaman Otaku"),
+                      value == OTAKU_PATH_NORMIE ? "Normie" : (value == OTAKU_PATH_CYBERADEPT ? "Cyberadept Otaku" : "Technoshaman Otaku"));
+    }
     break;
   default:
     snprintf(buf, sizeof(buf), "Can't set that!");
@@ -9031,6 +9092,51 @@ int audit_zone_objects_(struct char_data *ch, int zone_num, bool verbose) {
         issues++; \
       }
 
+      // Handedness check based on skill.
+      switch (GET_WEAPON_SKILL(obj)) {
+        // Expected to be 2h.
+        case SKILL_POLE_ARMS        :
+        case SKILL_RIFLES           :
+        case SKILL_SHOTGUNS         :
+        case SKILL_ASSAULT_RIFLES   :
+        case SKILL_GRENADE_LAUNCHERS:
+        case SKILL_GUNNERY          :
+        case SKILL_MACHINE_GUNS     :
+        case SKILL_MISSILE_LAUNCHERS:
+        case SKILL_ASSAULT_CANNON   :
+          if (!IS_OBJ_STAT(obj, ITEM_EXTRA_TWOHANDS)) {
+            strlcat(buf, "  - weapon is one-handed despite having a usually-two-handed weapon's skill\r\n", sizeof(buf));
+            issues++;
+          }
+          break;
+        case SKILL_WHIPS_FLAILS     :
+        case SKILL_TASERS           :
+        case SKILL_SMG              :
+        case SKILL_PISTOLS          :
+        case SKILL_CLUBS            :
+          if (IS_OBJ_STAT(obj, ITEM_EXTRA_TWOHANDS)) {
+            strlcat(buf, "  - weapon is two-handed despite having a usually-one-handed weapon's skill\r\n", sizeof(buf));
+            issues++;
+          }
+          break;
+        default:
+          snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - weapon uses odd skill (%s)\r\n", skills[GET_WEAPON_SKILL(obj)].name);
+          issues++;
+          break;
+      }
+
+      // Handedness based on reach.
+      if (!WEAPON_IS_GUN(obj)) {
+        if (GET_WEAPON_REACH(obj) >= 2 && !IS_OBJ_STAT(obj, ITEM_EXTRA_TWOHANDS)) {
+          snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - weapon is one-handed despite having high reach (%d)\r\n", GET_WEAPON_REACH(obj));
+          issues++;
+        }
+        else if (GET_WEAPON_REACH(obj) <= 0 && IS_OBJ_STAT(obj, ITEM_EXTRA_TWOHANDS)) {
+          snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - weapon is two-handed despite having low reach (%d)\r\n", GET_WEAPON_REACH(obj));
+          issues++;
+        }
+      }
+
       // Check for shared value overruns.
       WARN_ON_NON_KOSHER_VAL(GET_WEAPON_POWER, >, power);
 
@@ -9044,7 +9150,7 @@ int audit_zone_objects_(struct char_data *ch, int zone_num, bool verbose) {
       }
       
       if (GET_WEAPON_SKILL(obj) != kosher_weapon_values[GET_WEAPON_ATTACK_TYPE(obj)].skill) {
-        snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - weapon's skill (%s) may not match attack type %s's expected skill (%s)\r\n", 
+        snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - weapon's skill (%s) may not match attack type %s's expected skill (%s).\r\n", 
                  skills[GET_WEAPON_SKILL(obj)].name,
                  GET_WEAPON_TYPE_NAME(GET_WEAPON_ATTACK_TYPE(obj)),
                  skills[kosher_weapon_values[GET_WEAPON_ATTACK_TYPE(obj)].skill].name);
@@ -9059,7 +9165,7 @@ int audit_zone_objects_(struct char_data *ch, int zone_num, bool verbose) {
 
         // Firemode check.
         #define FIREMODE_CHECK(val_mode, val_name)  if (WEAPON_CAN_USE_FIREMODE(obj, val_mode) && !kosher_weapon_values[GET_WEAPON_ATTACK_TYPE(obj)].val_name) { \
-          snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - weapon can use ^ynon-kosher^n %s firemode\r\n", #val_mode); \
+          snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - weapon can use ^ynon-kosher^n %s firemode.\r\n", #val_mode); \
            \
           issues++; \
         }
@@ -9068,6 +9174,12 @@ int audit_zone_objects_(struct char_data *ch, int zone_num, bool verbose) {
         FIREMODE_CHECK(MODE_SA, can_sa);
         FIREMODE_CHECK(MODE_BF, can_bf);
         FIREMODE_CHECK(MODE_FA, can_fa);
+
+        // Warn on NO firemodes.
+        if (GET_WEAPON_POSSIBLE_FIREMODES(obj) == 0) {
+          strlcat(buf, "  - has ^yno firemodes set^n.\r\n", sizeof(buf));
+          issues++;
+        }
 
         // Notify on ANY recoil comp, erroneous or not
         if (GET_WEAPON_INTEGRAL_RECOIL_COMP(obj)) {
@@ -9087,15 +9199,15 @@ int audit_zone_objects_(struct char_data *ch, int zone_num, bool verbose) {
         }
 
         // Attachments
-        for (int idx = ACCESS_LOCATION_TOP; idx <= ACCESS_LOCATION_UNDER; idx++) {
-          vnum_t attach_vnum = GET_WEAPON_ATTACH_LOC(obj, idx);
-          const char *attach_loc = gun_accessory_locations[idx - ACCESS_LOCATION_TOP];
+        for (int access_location_idx = ACCESS_LOCATION_TOP; access_location_idx <= ACCESS_LOCATION_UNDER; access_location_idx++) {
+          vnum_t attach_vnum = GET_WEAPON_ATTACH_LOC(obj, access_location_idx);
+          const char *attach_loc = gun_accessory_locations[access_location_idx - ACCESS_LOCATION_TOP];
           bool should_be_able_to_take_attachment = FALSE;
 
           if (attach_vnum <= -1)
             continue;
 
-          switch (idx) {
+          switch (access_location_idx) {
             case ACCESS_LOCATION_TOP:
               should_be_able_to_take_attachment = kosher_weapon_values[GET_WEAPON_ATTACK_TYPE(obj)].can_attach_top;
               break;
@@ -9121,12 +9233,23 @@ int audit_zone_objects_(struct char_data *ch, int zone_num, bool verbose) {
               
               issues++;
             } else {
-              snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - has %s-attached item '%s^n' (%ld).\r\n", 
+              struct obj_data *attachment = &obj_proto[attach_rnum];
+              // Convert between the 'location idx' (weapon object val number, 7-indexed) and the access location (0-indexed)
+              int actual_attach_location = access_location_idx - ACCESS_LOCATION_TOP;
+
+              if (GET_ACCESSORY_ATTACH_LOCATION(attachment) != actual_attach_location) {
+                snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - has %s-attached item '%s^n' (%ld) on the ^ywrong-location^n, accessory expects %s.\r\n", 
+                       attach_loc, 
+                       GET_OBJ_NAME(&obj_proto[attach_rnum]),
+                       attach_vnum,
+                       gun_accessory_locations[GET_ACCESSORY_ATTACH_LOCATION(attachment)]);
+                issues++;
+              } else {
+                snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - has %s-attached item '%s^n' (%ld).\r\n", 
                        attach_loc, 
                        GET_OBJ_NAME(&obj_proto[attach_rnum]),
                        attach_vnum);
-              
-              issues++;
+              }
             }
           }
         }
@@ -9509,6 +9632,17 @@ int audit_zone_quests_(struct char_data *ch, int zone_num, bool verbose) {
   return issues;
 }
 
+#define REQUIRE_SHOPSTRING(variable_name, default_string) \
+  if (!shop->variable_name || !*(shop->variable_name)) { \
+    strlcat(buf, "  - '" #variable_name "' string ^ris missing^n\r\n", sizeof(buf)); issues++; \
+  } else if (!strcmp(shop->variable_name, default_string) || !strcmp(shop->variable_name, "(null)")) { \
+    if (!strcmp(#variable_name, "shopname")) { \
+      strlcat(buf, "  - '" #variable_name "' string ^yhas not been set^n\r\n", sizeof(buf)); issues++; \
+    } else { \
+      strlcat(buf, "  - '" #variable_name "' string has not been customized\r\n", sizeof(buf)); issues++; \
+    } \
+  }
+
 int audit_zone_shops_(struct char_data *ch, int zone_num, bool verbose) {
   int issues = 0, real_shp;
   struct shop_data *shop;
@@ -9568,15 +9702,25 @@ int audit_zone_shops_(struct char_data *ch, int zone_num, bool verbose) {
         issues++;
       }
 #endif
-    }
 
-    for (struct shop_sell_data *sell = shop_table[real_shp].selling; sell; sell = sell->next) {
-      rnum_t obj_rnum = real_object(sell->vnum);
-      if (obj_rnum < 0) {
-        snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - item ^c%ld^n is listed as for sale, but ^ydoes not exist^n.\r\n", obj_rnum);
-      }
-      else if (sell->type == SELL_AVAIL && GET_OBJ_AVAILTN(&obj_proto[obj_rnum]) == 0) {
-        snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - avail-listed item ^c%s ^n(^c%ld^n)^n ^yhas no TN^n.\r\n", GET_OBJ_NAME(&obj_proto[obj_rnum]), GET_OBJ_VNUM(&obj_proto[obj_rnum]));
+      REQUIRE_SHOPSTRING(no_such_itemk, SHOPSTRING_DEFAULT_no_such_itemk);
+      REQUIRE_SHOPSTRING(no_such_itemp, SHOPSTRING_DEFAULT_no_such_itemp);
+      REQUIRE_SHOPSTRING(not_enough_nuyen, SHOPSTRING_DEFAULT_not_enough_nuyen);
+      REQUIRE_SHOPSTRING(doesnt_buy, SHOPSTRING_DEFAULT_doesnt_buy);
+      REQUIRE_SHOPSTRING(buy, SHOPSTRING_DEFAULT_buy);
+      REQUIRE_SHOPSTRING(sell, SHOPSTRING_DEFAULT_sell);
+      REQUIRE_SHOPSTRING(shopname, SHOPSTRING_DEFAULT_shopname);
+
+      for (struct shop_sell_data *sell = shop_table[real_shp].selling; sell; sell = sell->next) {
+        rnum_t obj_rnum = real_object(sell->vnum);
+        if (obj_rnum < 0) {
+          snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - item ^c%ld^n is listed as for sale, but ^ydoes not exist^n.\r\n", obj_rnum);
+          issues++;
+        }
+        else if (sell->type == SELL_AVAIL && GET_OBJ_AVAILTN(&obj_proto[obj_rnum]) == 0) {
+          snprintf(ENDOF(buf), sizeof(buf) - strlen(buf), "  - avail-listed item ^c%s ^n(^c%ld^n)^n ^yhas no TN^n.\r\n", GET_OBJ_NAME(&obj_proto[obj_rnum]), GET_OBJ_VNUM(&obj_proto[obj_rnum]));
+          issues++;
+        }
       }
     }
 
@@ -9585,10 +9729,9 @@ int audit_zone_shops_(struct char_data *ch, int zone_num, bool verbose) {
     }
   }
 
-  // TODO: Make sure they've got all their strings set.
-
   return issues;
 }
+#undef REQUIRE_SHOPSTRING
 
 int audit_zone_vehicles_(struct char_data *ch, int zone_num, bool verbose) {
   int issues = 0, real_veh;

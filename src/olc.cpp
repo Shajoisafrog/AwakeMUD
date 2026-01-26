@@ -456,7 +456,10 @@ ACMD(do_dig)
   int counter, dir, room, zone1 = 0, zone2 = 0;
   struct room_data *in_room = get_ch_in_room(ch);
 
-  any_one_arg(any_one_arg(argument, arg), buf);
+  char *remainder = any_one_arg(any_one_arg(argument, arg), buf);
+  if (remainder && *remainder) {
+    skip_spaces(&remainder);
+  }
 
   // Message sent in function.
   if (!is_olc_available(ch)) {
@@ -511,7 +514,7 @@ ACMD(do_dig)
       // Create the new room in their editing struct.
       ch->desc->edit_number = atoi_buf;
       ch->desc->edit_room = Mem->GetRoom();
-      ch->desc->edit_room->name = str_dup("An unfinished but connected room");
+      ch->desc->edit_room->name = str_dup(remainder && *remainder ? remainder : "An unfinished but connected room");
       ch->desc->edit_room->description = str_dup("You are in an unfinished room.\r\n");
       ch->desc->edit_room->address = str_dup("An undisclosed location");
       int i = 0;
@@ -1930,12 +1933,13 @@ ACMD(do_shedit)
     d->edit_shop->profit_buy = 1.1;
     d->edit_shop->profit_sell = 0.1;
     d->edit_shop->buytypes.Clear();
-    d->edit_shop->no_such_itemk = str_dup("Sorry, we don't have that.");
-    d->edit_shop->no_such_itemp = str_dup("You don't seem to have that.");
-    d->edit_shop->not_enough_nuyen = str_dup("You don't have enough nuyen!");
-    d->edit_shop->doesnt_buy = str_dup("We don't buy that.");
-    d->edit_shop->buy = str_dup("That'll be %d nuyen.");
-    d->edit_shop->sell = str_dup("Here's your %d nuyen.");
+    d->edit_shop->no_such_itemk = str_dup(SHOPSTRING_DEFAULT_no_such_itemk);
+    d->edit_shop->no_such_itemp = str_dup(SHOPSTRING_DEFAULT_no_such_itemp);
+    d->edit_shop->not_enough_nuyen = str_dup(SHOPSTRING_DEFAULT_not_enough_nuyen);
+    d->edit_shop->doesnt_buy = str_dup(SHOPSTRING_DEFAULT_doesnt_buy);
+    d->edit_shop->buy = str_dup(SHOPSTRING_DEFAULT_buy);
+    d->edit_shop->sell = str_dup(SHOPSTRING_DEFAULT_sell);
+    d->edit_shop->shopname = str_dup(SHOPSTRING_DEFAULT_shopname);
     d->edit_shop->keeper = -1;
     d->edit_shop->open = 0;
     d->edit_shop->close = 24;

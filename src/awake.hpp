@@ -91,6 +91,9 @@
 #define OTAKU_PATH_NORMIE     0
 #define OTAKU_PATH_CYBERADEPT 1
 #define OTAKU_PATH_TECHNOSHAM 2
+#define MAX_OTAKU_PATH        2
+
+
 
 /* magical traditions */
 
@@ -488,8 +491,9 @@ enum {
 #define PRF_NOFOLLOW                           69
 #define PRF_SUPPRESS_PROMPT_CHANGE             70
 #define PRF_PASSIVE_IN_COMBAT                  71
-#define PRF_AUTOREADY                          72
-#define PRF_MAX                                73
+#define PRF_NO_AUTOREADY                       72
+#define PRF_NOROUNDTIME                        73
+#define PRF_MAX                                74
 
 /* log watch */
 
@@ -800,7 +804,9 @@ enum {
 #define SPELL_INFRAVISION    67
 #define SPELL_LEVITATE    68
 #define SPELL_FLAME_AURA    69
-#define MAX_SPELLS    70
+#define SPELL_ANALYZEMAGIC  70
+#define SPELL_CATALOG       71
+#define MAX_SPELLS    72
 
 #define SPELL_DESIGN_FAILED_CODE -3
 
@@ -814,7 +820,8 @@ enum {
 #define META_REFLECTING    7
 #define META_SHIELDING    8
 #define META_ANCHORING    9
-#define META_MAX    10
+#define META_DIVINING     10
+#define META_MAX    11
 
 #define MASK_INIT    (1 << 1)
 #define MASK_DUAL    (1 << 2)
@@ -1254,6 +1261,8 @@ enum {
 #define TYPE_DRUGS            416
 #define TYPE_POISON           417
 #define TYPE_FOCUS_OVERUSE    418
+#define TYPE_PENANCE          419
+// Adding a new one? Put it in raw_damage()'s equipment damage check.
 
 /* magic attack types */
 #define TYPE_MANABOLT_OR_STUNBOLT       500
@@ -1439,7 +1448,10 @@ enum {
 #define ITEM_EXTRA_CONCEALED_IN_EQ    34    // Doesn't show up when someone looks at you.
 #define ITEM_EXTRA_TRODE_NET          35
 #define ITEM_EXTRA_OTAKU_RESONANCE    36    // This is related to Otaku nonsense
-#define MAX_ITEM_EXTRA                37
+#define ITEM_EXTRA_ARRANGED           37
+#define ITEM_EXTRA_INVERT_TWOHANDED   38
+#define MAX_ITEM_EXTRA                39
+// Adding something here? Put it in both 'pc_readable_extra_bits' and 'extra_bits' in constants.cpp
 
 /* Ammo types */
 #define AMMO_NORMAL     0
@@ -1753,7 +1765,22 @@ enum {
 #define SOFT_RESPONSE           38
 #define SOFT_SHIELD             39
 #define SOFT_RADIO              40
-#define NUM_PROGRAMS            41
+#define SOFT_DOORSTOP           41
+#define SOFT_MIRRORS            42
+#define SOFT_PURGE              43
+#define SOFT_REDECORATE         44
+#define SOFT_SPOOF              45
+#define SOFT_TRIANGULATION      46
+#define SOFT_COUNTERFEIT        47
+#define SOFT_GUARDIAN           48
+#define SOFT_REMOTE_CONTROL     49
+#define SOFT_BLACK_HAMMER       50
+#define SOFT_EROSION            51
+#define SOFT_HOG                52
+#define SOFT_KILLJOY            53
+#define SOFT_STEAMROLLER        54
+#define SOFT_RESTORE            55
+#define NUM_PROGRAMS            56
 
 #define PART_ACTIVE    1
 #define PART_STORAGE    2
@@ -2334,6 +2361,7 @@ enum {
 // If you add another state, you need to touch comm.cpp's close_socket and make sure it's reflected there!
 // Also add it to constants's connected_types.
 // And gmcp.cpp's generate_discord_state().
+// Then, if you've added an editing state, you need to review free_editing_structs() and make sure it's reflected PROPERLY there. Pay close attention to things that give characters objects (program creation etc).
 
 /* arbitrary constants used by index_boot() (must be unique) */
 #define DB_BOOT_WLD     0
@@ -2484,7 +2512,6 @@ enum {
 #define MAX_SHORTDESC_LEN         200
 
 // New combat modifiers used in the rework of hit().
-// Adding an additional one? Make sure you list it in the dodge check switch case if appropriate.
 #define COMBAT_MOD_RECOIL                0
 #define COMBAT_MOD_MOVEMENT              1
 #define COMBAT_MOD_DUAL_WIELDING         2
@@ -2502,8 +2529,11 @@ enum {
 #define COMBAT_MOD_VEHICLE_HANDLING      14
 #define COMBAT_MOD_WIELDING_A_NON_WEAPON 15
 #define COMBAT_MOD_RIOT_SHIELD           16
-#define NUM_COMBAT_MODIFIERS             17
+#define COMBAT_MOD_HANDEDNESS_CHANGE     17
+#define NUM_COMBAT_MODIFIERS             18
 // End new combat modifiers.
+// Adding an additional one? Make sure you list it in the dodge check switch case if appropriate. ("case combat_mod...")
+// Also add it to combat_modifiers.
 
 #define JURISDICTION_SEATTLE   0
 #define JURISDICTION_PORTLAND  1

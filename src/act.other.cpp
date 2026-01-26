@@ -91,7 +91,7 @@ ACMD(do_quit)
     send_to_char("You have to type quit - no less, to quit!\r\n", ch);
     return;
   }
-  void die(struct char_data * ch, idnum_t cause_of_death);
+  void die(struct char_data * ch, idnum_t cause_of_death, bool should_splatter_and_scream);
   struct descriptor_data *d, *next_d;
 
   if (IS_NPC(ch) || !ch->desc)
@@ -117,7 +117,7 @@ ACMD(do_quit)
   if (GET_POS(ch) <= POS_STUNNED) {
     send_to_char("You die before your time...\r\n", ch);
     act("$n gives up the struggle to live...", TRUE, ch, 0, 0, TO_ROOM);
-    die(ch, 0);
+    die(ch, 0, true);
   } else {
     GET_LAST_IN(ch) = GET_ROOM_VNUM(ch->in_room);
     struct room_data *save_room = ch->in_room;
@@ -1219,8 +1219,10 @@ const char *tog_messages[][2] = {
                              "OK, you will no longer be able to initiate combat or fight back.\r\n"},
                             {"You will now see ambiance messages and environmental echoes about traffic.\r\n",
                              "You will no longer see ambiance messages and environmental echoes about traffic.\r\n"},
-                            {"You will no longer automatically ready your holstered/sheathed weapons.\r\n",
-                             "You will now automatically ready your holstered/sheathed weapons.\r\n"}
+                            {"You will now automatically ready your holstered/sheathed weapons.\r\n",
+                             "You will no longer automatically ready your holstered/sheathed weapons.\r\n"},
+                            {"You will now see roundtime messages for your actions.\r\n",
+                             "You will no longer see roundtime messages for your actions.\r\n"}
                           };
 
 ACMD(do_toggle)
@@ -1512,9 +1514,12 @@ ACMD(do_toggle)
     } else if (is_abbrev(argument, "traffic") || is_abbrev(argument, "notraffic") || is_abbrev(argument, "no traffic")) {
       result = PRF_TOG_CHK(ch, PRF_NOTRAFFIC);
       mode = 52;
-    } else if (is_abbrev(argument, "autoready") || is_abbrev(argument, "ready")) {
-      result = PRF_TOG_CHK(ch, PRF_AUTOREADY);
+    } else if (is_abbrev(argument, "autoready") || is_abbrev(argument, "ready") || is_abbrev(argument, "no autoready") || is_abbrev(argument, "no ready")) {
+      result = PRF_TOG_CHK(ch, PRF_NO_AUTOREADY);
       mode = 53;
+    } else if (is_abbrev(argument, "roundtime messages") || is_abbrev(argument, "no roundtime messages") || is_abbrev(argument, "round time messages") || is_abbrev(argument, "no round time messages")) {
+      result = PRF_TOG_CHK(ch, PRF_NOROUNDTIME);
+      mode = 54;
     } else {
       send_to_char("That is not a valid toggle option.\r\n", ch);
       return;
@@ -2285,9 +2290,19 @@ ACMD(do_treat)
   char rbuf[1000];
   snprintf(rbuf, sizeof(rbuf), "Treat TN: Base %d", target);
 
-  if (vict->in_room && ROOM_FLAGGED(vict->in_room, ROOM_STERILE)) {
-    target -= 2;
-    strlcat(rbuf, ", -2 for sterile room", sizeof(rbuf));
+  if (ROOM_FLAGGED(vict->in_room, ROOM_STERILE)) {
+    if (GET_APARTMENT(vict->in_room)) {
+      // To get the benefit, the apartment must be owned with a valid lease, and you must be the owner or a guest.
+      if (GET_APARTMENT(vict->in_room)->is_owner_or_guest_with_valid_lease(ch)) {
+        target -= 2;
+        strlcat(rbuf, ", -2 for sterile apartment", sizeof(rbuf));
+      } else {
+        strlcat(rbuf, ", room is sterile apartment but you're not an owner or guest", sizeof(rbuf));
+      }
+    } else {
+      target -= 2;
+      strlcat(rbuf, ", -2 for sterile room", sizeof(rbuf));
+    }
   }
 
   skill = get_skill(ch, SKILL_BIOTECH, target);
@@ -5428,6 +5443,7 @@ ACMD(do_stop) {
     if (SPEED_IDLE < veh->cspeed) {
       send_to_char("You bring the vehicle to a halt.\r\n", ch);
       send_to_veh("The vehicle slows to a stop.\r\n", veh, ch, FALSE);
+      veh->cspeed = SPEED_IDLE;
     } else {
       send_to_char("Your vehicle isn't moving.\r\n", ch);
     }

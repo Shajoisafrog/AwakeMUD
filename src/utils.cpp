@@ -61,6 +61,7 @@
 #include "quest.hpp"
 #include "chipjacks.hpp"
 #include "newdb.hpp"
+#include "vehicles.hpp"
 
 extern class memoryClass *Mem;
 extern struct time_info_data time_info;
@@ -866,7 +867,7 @@ char *decapitalize_a_an(struct veh_data *veh)
   return decapitalize_a_an(GET_VEH_NAME(veh));
 }
 
-// duplicate a string -- uses new!
+// duplicate a string -- uses new! You must delete[] the results of this.
 char *str_dup(const char *source)
 {
   if (!source)
@@ -3271,7 +3272,7 @@ struct room_data *get_ch_in_room(struct char_data *ch)
     return get_veh_in_room(ch->in_veh);
   }
 
-  snprintf(errbuf, sizeof(errbuf), "SYSERR: get_ch_in_room called on char %s, but they're not in a room or vehicle!", GET_CHAR_NAME(ch));
+  snprintf(errbuf, sizeof(errbuf), "SYSERR: get_ch_in_room called on char %s (state %d), but they're not in a room or vehicle!", GET_CHAR_NAME(ch), ch->desc ? STATE(ch->desc) : -1);
   mudlog(errbuf, ch, LOG_SYSLOG, TRUE);
 
   return &world[0];
@@ -5069,6 +5070,8 @@ bool spell_is_nerp(int spell_num)
   case SPELL_SMOKECLOUD:
   case SPELL_THUNDERCLAP:
   case SPELL_SPLASH:
+  case SPELL_ANALYZEMAGIC:
+  case SPELL_CATALOG:
     return TRUE;
   }
 
@@ -5365,10 +5368,23 @@ bool get_and_deduct_one_crafting_token_from_char(struct char_data *ch)
       if (GET_CRAFTING_TOKEN_IDNUM(ptr) > 0 && GET_CRAFTING_TOKEN_IDNUM(ptr) != GET_IDNUM(ch))
       {
         char *owner_name = get_player_name(GET_CRAFTING_TOKEN_IDNUM(ptr));
-        mudlog_vfprintf(ch, LOG_CHEATLOG, "Warning: %s is holding a crafting token that actually belongs to %s (%ld).",
+
+        mudlog_vfprintf(ch, LOG_CHEATLOG, "Warning: %s is holding a crafting token that actually belongs to %s (%ld). Forcing them to drop it.",
                         GET_CHAR_NAME(ch),
                         owner_name,
                         GET_CRAFTING_TOKEN_IDNUM(ptr));
+
+        send_to_char(ch, "%s zaps you, and you drop it.\r\n", GET_OBJ_NAME(ptr));
+        obj_from_char(ptr);
+        if (ch->in_veh) {
+          obj_to_veh(ptr, ch->in_veh);
+        } else if (ch->in_room) {
+          obj_to_room(ptr, ch->in_room);
+        } else {
+          mudlog_vfprintf(ch, LOG_WIZLOG, "Failed to drop token belonging to %s (%ld), sending it to room 0.", owner_name, GET_CRAFTING_TOKEN_IDNUM(ptr));
+          obj_to_room(ptr, &world[0]);
+        }
+
         delete[] owner_name;
         continue;
       }
@@ -5650,7 +5666,7 @@ int get_string_length_after_color_code_removal(const char *str, struct char_data
 }
 
 // Returns a string stripped of color for keyword matching or possibly other uses as well.
-// We don't need to check for color code validity because we call get_string_legth_after_color_code_removal() when the strings are initially written.
+// We don't need to check for color code validity because we call get_string_length_after_color_code_removal() when the strings are initially written.
 char *get_string_after_color_code_removal(const char *str, struct char_data *ch)
 {
   if (!str)
@@ -8630,9 +8646,22 @@ idnum_t get_soulbound_idnum(struct obj_data *obj)
   if (obj_is_a_vehicle_title(obj))
     return GET_VEHICLE_TITLE_OWNER(obj);
 
-  // Special case: Visas. If you update this, update newshop's visa defense as well.
-  if (GET_OBJ_VNUM(obj) == OBJ_MULTNOMAH_VISA || GET_OBJ_VNUM(obj) == OBJ_CARIBBEAN_VISA)
-    return GET_VISA_OWNER(obj);
+  // Per-object vnum checks.
+  switch (GET_OBJ_VNUM(obj)) {
+    // Special case: Visas. If you update this, update newshop's visa defense as well.
+    case OBJ_MULTNOMAH_VISA:
+    case OBJ_CARIBBEAN_VISA:
+      return (GET_VISA_OWNER(obj));
+    // One-shot heals.
+    case OBJ_ONE_SHOT_HEALING_INJECTOR:
+      return (GET_HEALING_INJECTOR_ISSUED_TO(obj));
+    // Crafting / deckbuilding rebate tokens.
+    case OBJ_STAFF_REBATE_FOR_CRAFTING:
+      return (GET_CRAFTING_TOKEN_IDNUM(obj));
+    // Penance, the black arrowhead.
+    case OBJ_ANNIVERSARY_2026_GIFT:
+      return (GET_OBJ_VAL(obj, 0));
+  }
 
   return SB_CODE_OBJ_CANT_BE_SOULBOUND;
 }
@@ -8720,10 +8749,25 @@ bool soulbind_obj_to_char_by_idnum(struct obj_data *obj, idnum_t idnum, bool inc
     BIND_AND_RETURN_TRUE_IF_NOT_ALREADY_BOUND(GET_VEHICLE_TITLE_OWNER(obj));
   }
 
-  // Special case: Visas. If you update this, update newshop's visa defense as well.
-  if (GET_OBJ_VNUM(obj) == OBJ_MULTNOMAH_VISA || GET_OBJ_VNUM(obj) == OBJ_CARIBBEAN_VISA)
-  {
-    BIND_AND_RETURN_TRUE_IF_NOT_ALREADY_BOUND(GET_VISA_OWNER(obj));
+  // Per-object vnum checks.
+  switch (GET_OBJ_VNUM(obj)) {
+    // Special case: Visas. If you update this, update newshop's visa defense as well.
+    case OBJ_MULTNOMAH_VISA:
+    case OBJ_CARIBBEAN_VISA:
+      BIND_AND_RETURN_TRUE_IF_NOT_ALREADY_BOUND(GET_VISA_OWNER(obj));
+      break;
+    // One-shot heals.
+    case OBJ_ONE_SHOT_HEALING_INJECTOR:
+      BIND_AND_RETURN_TRUE_IF_NOT_ALREADY_BOUND(GET_HEALING_INJECTOR_ISSUED_TO(obj));
+      break;
+    // Crafting / deckbuilding rebate tokens.
+    case OBJ_STAFF_REBATE_FOR_CRAFTING:
+      BIND_AND_RETURN_TRUE_IF_NOT_ALREADY_BOUND(GET_CRAFTING_TOKEN_IDNUM(obj));
+      break;
+    // Penance, the black arrowhead.
+    case OBJ_ANNIVERSARY_2026_GIFT:
+      BIND_AND_RETURN_TRUE_IF_NOT_ALREADY_BOUND(GET_OBJ_VAL(obj, 0));
+      break;
   }
 
   return FALSE;
@@ -9670,3 +9714,82 @@ const char *cleanup_invalid_color_codes(const char *str) {
 
   return cleanup_buf;
 }
+
+struct veh_data *resolve_vehicle_from_vehcontainer(struct obj_data *obj) {
+  // Load vehicles owned by the identified owner to reduce cases of stuck containers.
+  load_vehicles_for_idnum(GET_VEHCONTAINER_VEH_OWNER(obj));
+
+  // Find the veh storage room.
+  rnum_t vehicle_storage_rnum = real_room(RM_PORTABLE_VEHICLE_STORAGE);
+  if (vehicle_storage_rnum < 0)
+  {
+    mudlog("SYSERR: Got negative rnum when looking up RM_PORTABLE_VEHICLE_STORAGE!", NULL, LOG_SYSLOG, TRUE);
+    return NULL;
+  }
+
+  // Search it for our vehicle.
+  for (struct veh_data *veh = world[vehicle_storage_rnum].vehicles; veh; veh = veh->next_veh)
+  {
+    if (GET_VEH_VNUM(veh) == GET_VEHCONTAINER_VEH_VNUM(obj) && veh->idnum == GET_VEHCONTAINER_VEH_IDNUM(obj) && veh->owner == GET_VEHCONTAINER_VEH_OWNER(obj))
+    {
+      // Found it! Return the vehicle.
+      return veh;
+    }
+  }
+  return NULL;
+}
+
+// Search for a case-insensitive instance of KEYWORD in STR, matching only whole words. Return true if found, false otherwise.
+bool whole_word_exists_in_str(const char* keyword, const char* str) {
+  if (!keyword || !str) return false;
+  if (*keyword == '\0') return true;
+
+  for (const char *p = str; *p;) {
+    const char *keyword_ptr = keyword;
+
+    // Advance until the first valid letter.
+    while (*p && !isalnum((unsigned char) *p)) {
+      p++;
+    }
+
+    // Test this word.
+    while ((*p && *keyword_ptr) && (tolower((unsigned char) *p) == tolower((unsigned char) *keyword_ptr))) {
+      p++;
+      keyword_ptr++;
+    }
+
+    // If we successfully reached the end of the keyword and *p is neither alnum nor an apostrophe followed by a letter, we know it's a match. Otherwise, keep rolling.
+    if (!*keyword_ptr && !isalnum((unsigned char) *p) && !(*p == '\'' && isalnum((unsigned char) *(p+1)))) {
+      return true;
+    }
+    
+    // Didn't find a match, so advance to the end of the word.
+    while (*p && (isalnum((unsigned char) *p) || *p == '\'')) {
+      p++;
+    }
+  }
+  return false;
+}
+
+#define _KEYWORD_DELIMITER " ,.!?;:"
+bool at_least_one_word_in_keyword_list_exists_in_str(const char *keywords, const char *str) {
+  if (!keywords || !str || *keywords == '\0') return false;
+
+  // 1. Create a stack-based copy of the keyword list so we can tokenize it destructively
+  char copy[MAX_KEYWORDS_LEN];
+  strlcpy(copy, get_string_after_color_code_removal(keywords, NULL), sizeof(copy));
+
+  const char *token = strtok(copy, _KEYWORD_DELIMITER);
+  const char *decolorized_str = get_string_after_color_code_removal(str, NULL);
+
+  while (token != NULL) {
+    // Since we aren't using the heap, we can return immediately
+    if (whole_word_exists_in_str(token, decolorized_str)) {
+      return true;
+    }
+    token = strtok(NULL, _KEYWORD_DELIMITER);
+  }
+
+  return false;
+}
+#undef _KEYWORD_DELIMITER

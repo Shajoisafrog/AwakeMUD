@@ -41,6 +41,7 @@ extern bool Storage_get_filename(vnum_t vnum, char *filename, int filename_size)
 extern void Storage_save(const char *file_name, struct room_data *room);
 extern bool player_is_dead_hardcore(long id);
 extern bool House_load_storage(struct room_data *world_room, const char *filename);
+extern bool at_least_one_word_in_keyword_list_exists_in_str(const char *keywords, const char *str);
 
 SPECIAL(landlord_spec);
 
@@ -1411,6 +1412,16 @@ bool Apartment::has_owner_privs_by_idnum(idnum_t idnum) {
   return FALSE;
 }
 
+bool Apartment::is_owner_or_guest_with_valid_lease(struct char_data *ch) {
+  if (get_remaining_lease_value() < 0)
+    return false;
+
+  if (!has_owner_privs(ch) && !is_guest(GET_IDNUM(ch)))
+    return false;
+
+  return true;
+}
+
 void Apartment::list_guests_to_char(struct char_data *ch) {
   send_to_char(ch, "  Guests: ");
 
@@ -2578,6 +2589,9 @@ SPECIAL(landlord_spec)
 
   if (CMD_IS("list")) {
     complex->display_room_list_to_character(ch);
+    if (GET_MOB_VNUM(recep) == 103700 && !PLR_FLAGGED(ch, PLR_CYBERDOC)) {
+      send_to_char(ch, "^L(Note: Only cyberdoc-flagged PCs can rent here.)^n\r\n");
+    }
     return TRUE;
   }
 
@@ -2608,6 +2622,12 @@ SPECIAL(landlord_spec)
   }
 
   else if (CMD_IS("lease")) {
+    // Restrict the clinics to only leasing to cyberdoc-flagged PCs.
+    if (GET_MOB_VNUM(recep) == 103700 && !PLR_FLAGGED(ch, PLR_CYBERDOC)) {
+      mob_say(recep, "Sorry, if you're not a medical professional you can't lease here.");
+      return TRUE;
+    }
+
     if (!*arg) {
       mob_say(recep, "Which room would you like to lease?");
       complex->display_room_list_to_character(ch);
@@ -2761,4 +2781,74 @@ SPECIAL(landlord_spec)
     return TRUE;
   }
   return FALSE;
+}
+
+// The ARRANGE command, which lets you set the graffiti of items in apartments.
+#define MAX_ARRANGED_ITEMS_PER_ROOM 6
+#define ARRANGE_ITEM_COST 50
+ACMD(do_arrange) {
+  struct obj_data *obj = NULL;
+  struct char_data *dummy_vict = NULL;
+  char target_obj_keyword[MAX_INPUT_LENGTH + 1];
+
+  FAILURE_CASE(ch->in_veh, "Sorry, you can't arrange things in vehicles.");
+  FAILURE_CASE(!ch->in_room || !GET_APARTMENT(ch->in_room), "Sorry, you can only arrange things in apartments you own.");
+  FAILURE_CASE(!GET_APARTMENT(ch->in_room)->has_owner_privs(ch), "You must be the owner of the apartment to arrange things in it.");
+  FAILURE_CASE(IS_ASTRAL(ch), "You eye your insubstantial hands with annoyance... better get back to your meat suit first.");
+
+  // Limit of 6 arranged objects per room.
+  {
+    int arranged_count = 0;
+    for (struct obj_data *tmp = ch->in_room->contents; tmp; tmp = tmp->next_content) {
+      FAILURE_CASE_PRINTF(IS_OBJ_STAT(tmp, ITEM_EXTRA_ARRANGED) && arranged_count++ > MAX_ARRANGED_ITEMS_PER_ROOM,
+                          "Sorry, you can only arrange %d items per room. You can pick up an object to un-arrange it.",
+                          MAX_ARRANGED_ITEMS_PER_ROOM);
+    }
+  }
+
+  // Costs nuyen for materials.
+  FAILURE_CASE_PRINTF(GET_NUYEN(ch) < ARRANGE_ITEM_COST, "It'll cost you %d nuyen in materials to do that, and you don't have enough cash on hand.", ARRANGE_ITEM_COST);
+
+  // Parse out the targeted object, which must be on the floor in the room.
+  char *new_position = any_one_arg(argument, target_obj_keyword);
+
+  FAILURE_CASE(!*target_obj_keyword || !new_position || !*new_position, "Syntax: ARRANGE <object keyword> <new position>.\r\nExample: ARRANGE MOSSBERG A Mossberg shotgun leans by the door, ready to assist in home defense.");
+
+  // Cap the length of the graffiti. SQL has it as a varchar(256).
+  FAILURE_CASE(strlen(new_position) >= 256, "Sorry, that arrangement string is too long. For database reasons, you'll need to keep it under 256 characters.");
+
+  // Make sure it's valid for arranging (must exist, must not have its own graffiti)
+  FAILURE_CASE_PRINTF(!generic_find(target_obj_keyword, FIND_OBJ_ROOM, ch, &dummy_vict, &obj), "You don't see anything named '%s' here.", target_obj_keyword);
+  FAILURE_CASE(GET_OBJ_TYPE(obj) == ITEM_CREATIVE_EFFORT, "Sorry, code limitations prevent arranging art (it would permanently destroy the existing room desc).");
+  FAILURE_CASE(GET_OBJ_TYPE(obj) == ITEM_GRAFFITI, "You scratch your head as you try to figure out how to move graffiti around. Maybe if you cut it out of the wall...?");
+  FAILURE_CASE_PRINTF(GET_OBJ_TYPE(obj) == ITEM_PET, "You receive some serious side-eye from %s and think better of it.", decapitalize_a_an(GET_OBJ_NAME(obj)));
+
+  // Require that at least one keyword from the object is present in the new desc.
+  FAILURE_CASE_PRINTF(!at_least_one_word_in_keyword_list_exists_in_str(GET_OBJ_KEYWORDS(obj), new_position),
+                      "You must include at least one of %s's keywords in the new position."
+                      " When in doubt, go with the more descriptive one (pick 'mossberg' over 'gun', etc)\r\n Keywords: '%s'",
+                      decapitalize_a_an(GET_OBJ_NAME(obj)),
+                      GET_OBJ_KEYWORDS(obj));
+
+  // Capitalize and add terminal punctuation.
+  skip_spaces(&new_position);
+  char formatted_position[MAX_INPUT_LENGTH + 10];
+  snprintf(formatted_position, sizeof(formatted_position), "%s%s^n", CAP(new_position), ispunct(get_final_character_from_string(new_position)) ? "" : ".");
+
+  // Charge the cash.
+  lose_nuyen(ch, ARRANGE_ITEM_COST, NUYEN_OUTFLOW_DECORATING);
+
+  // Put that thang down, shift it and reverse it.
+  DELETE_AND_NULL(obj->graffiti);
+  obj->graffiti = str_dup(formatted_position);
+  GET_OBJ_EXTRA(obj).SetBit(ITEM_EXTRA_ARRANGED);
+
+  // Message it.
+  WAIT_STATE(ch, 30);
+  snprintf(buf, sizeof(buf), "You spend %d nuyen and a little time rearranging $p.", ARRANGE_ITEM_COST);
+  act(buf, FALSE, ch, obj, 0, TO_CHAR);
+  act("$n spends a little time rearranging $p.", FALSE, ch, obj, 0, TO_ROOM);
+
+  // Log it for posterity.
+  mudlog_vfprintf(ch, LOG_WIZLOG, "%s spent %d to arrange '%s' (%ld) as '%s'", GET_CHAR_NAME(ch), ARRANGE_ITEM_COST, GET_OBJ_NAME(obj), GET_OBJ_VNUM(obj), formatted_position);
 }

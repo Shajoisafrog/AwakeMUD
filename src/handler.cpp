@@ -99,7 +99,7 @@ char *fname_allchars(char *namelist)
   return (holder);
 }
 
-
+// Iterate over namelist by word, looking for a case-insensitive abbreviation match with str. If it exists, return 1, else 0.
 int isname(const char *str, const char *namelist)
 {
   if(namelist == NULL)
@@ -1223,16 +1223,15 @@ void affect_total(struct char_data * ch)
 }
 
 /*
- * Return if a char is affected by a spell (SPELL_XXX), NULL indicates
- * not affected
+ * If ch is affected by specified spell, returns force, otherwise returns 0.
  */
-int affected_by_spell(struct char_data * ch, int type)
+int affected_by_spell(struct char_data * ch, int spell_idx)
 {
   if (!GET_SUSTAINED(ch))
     return 0;
 
   for (struct sustain_data *hjp = GET_SUSTAINED(ch); hjp; hjp = hjp->next) {
-    if ((hjp->spell == type) && (hjp->is_caster_record == FALSE))
+    if ((hjp->spell == spell_idx) && (hjp->is_caster_record == FALSE))
       return hjp->force;
   
     // Elementals shouldn't have anything cast on them.
@@ -1705,9 +1704,13 @@ void obj_to_char(struct obj_data * object, struct char_data * ch)
     apply_focus_effect(ch, object);
   }
 
-  // If it's a carried vehicle, set their flag to block movement through !BIKE rooms.
-  if (GET_OBJ_VNUM(object) == OBJ_VEHCONTAINER)
-    ch->is_carrying_vehicle = TRUE;
+  // If it's a carried vehicle, set their flag to block movement through !BIKE rooms, but only if it's not wrecked.
+  if (GET_OBJ_VNUM(object) == OBJ_VEHCONTAINER) {
+    struct veh_data *veh = resolve_vehicle_from_vehcontainer(object);
+    if (veh && veh->damage < VEH_DAM_THRESHOLD_DESTROYED) {
+      ch->is_carrying_vehicle = TRUE;
+    }
+  }
 }
 
 void obj_to_cyberware(struct obj_data * object, struct char_data * ch, bool recalc)
@@ -2292,6 +2295,13 @@ void obj_from_room(struct obj_data * object)
 
     // Strip it out of the room's contents.
     REMOVE_FROM_LIST(object, object->in_room->contents, next_content);
+
+    // If it's arranged, un-arrange it.
+    if (IS_OBJ_STAT(object, ITEM_EXTRA_ARRANGED)) {
+      GET_OBJ_EXTRA(object).RemoveBit(ITEM_EXTRA_ARRANGED);
+      DELETE_AND_NULL_ARRAY(object->graffiti);
+      act("The careful arrangement of $p is disrupted!", FALSE, 0, object, 0, TO_ROOM);
+    }
   }
 
   // Ensure the workshop is packed up when it's removed from the room / vehicle.
@@ -2834,13 +2844,14 @@ void extract_obj(struct obj_data * obj, bool dont_warn_on_kept_items)
       extract_obj(obj->contains, dont_warn_on_kept_items);
   }
 
+  // Ensure it's removed from the object list.
   if (!ObjList.Remove(obj))
-    log_vfprintf("ObjList.Remove returned FALSE!  (%ld)", GET_OBJ_VNUM(obj));
+    log_vfprintf("ObjList.Remove returned FALSE!  (%ld-%ld)", GET_OBJ_VNUM(obj), GET_OBJ_IDNUM(obj));
 
   if (GET_OBJ_RNUM(obj) >= 0)
     (obj_index[GET_OBJ_RNUM(obj)].number)--;
 
-  Mem->DeleteObject(obj);
+  Mem->DeleteObject(obj, "extract_obj");
 
 #ifdef ENABLE_THIS_IF_YOU_WANT_TO_HATE_YOUR_LIFE
   verify_every_pointer_we_can_think_of();

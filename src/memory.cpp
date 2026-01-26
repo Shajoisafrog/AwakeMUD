@@ -85,7 +85,7 @@ struct room_data *memoryClass::GetRoom()
   return temp;
 }
 
-void memoryClass::DeleteObject(struct obj_data *obj)
+void memoryClass::DeleteObject(struct obj_data *obj, const char *source)
 {
   // we want to do this so that when we pop em off, they are usable
   free_obj(obj);

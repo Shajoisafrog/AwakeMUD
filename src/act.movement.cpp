@@ -587,7 +587,7 @@ int do_simple_move(struct char_data *ch, int dir, int extra, struct char_data *v
   }
 #endif
 
-  if (ROOM_FLAGGED(ch->in_room, ROOM_FALL) && !IS_ASTRAL(ch) && !IS_AFFECTED(ch, AFF_LEVITATE) && !(IS_SENATOR(ch) && PRF_FLAGGED(ch, PRF_NOHASSLE))) {
+  if (ROOM_FLAGGED(ch->in_room, ROOM_FALL) && !IS_ASTRAL(ch) && !(IS_SENATOR(ch) && PRF_FLAGGED(ch, PRF_NOHASSLE)) && !AFF_FLAGGED(ch, AFF_LEVITATE)) {
     bool character_died;
     // We break the return code paradigm here to avoid having the code check follower data for a dead NPC.
     bool is_npc = IS_NPC(ch);
@@ -624,7 +624,8 @@ bool check_fall(struct char_data *ch, int modifier, const char *fall_message)
       base_target -= GET_OBJ_VAL(GET_EQ(ch, i), 0);
     }
   for (struct obj_data *cyber = ch->cyberware; cyber; cyber = cyber->next_content)
-    if (GET_CYBERWARE_TYPE(cyber) == CYB_BALANCETAIL || GET_CYBERWARE_TYPE(cyber) == CYB_BALANCEAUG) {
+    if (GET_CYBERWARE_TYPE(cyber) == CYB_BALANCETAIL || GET_CYBERWARE_TYPE(cyber) == CYB_BALANCEAUG || 
+       (GET_CYBERWARE_TYPE(cyber) == CYB_CLIMBINGCLAWS && !GET_CYBERWARE_IS_DISABLED(cyber))) {
       snprintf(ENDOF(roll_buf), sizeof(roll_buf) - strlen(roll_buf), " - %s lowers TN by 2.\r\n", GET_OBJ_NAME(cyber));
       base_target -= 2;
     }
@@ -638,6 +639,13 @@ bool check_fall(struct char_data *ch, int modifier, const char *fall_message)
   }
 
   dice = get_skill(ch, SKILL_ATHLETICS, base_target);
+
+  int levitate_dice = affected_by_spell(ch, SPELL_LEVITATE);
+  if (levitate_dice) {
+    snprintf(ENDOF(roll_buf), sizeof(roll_buf) - strlen(roll_buf), "Adding %d dice to athletics skill due to levitate spell. ", levitate_dice);
+    dice += levitate_dice;
+  }
+
   snprintf(ENDOF(roll_buf), sizeof(roll_buf) - strlen(roll_buf), "Athletics check: Rolling %d dice against a final TN of %d results in ", dice, base_target);
   // dice += GET_REA(ch);
   success = success_test(dice, base_target) + autosucc;
@@ -1374,6 +1382,13 @@ void do_doorcmd(struct char_data *ch, struct obj_data *obj, int door, int scmd, 
       else
         send_to_char(ch, "You %s the %s to %s.\r\n", scmd == SCMD_OPEN ? "open" : "close", GET_DOOR_NAME(ch, door), thedirs[door]);
     }
+    if (!obj) {
+      // Update last open/close interaction time.
+      if (other_room)
+        EXIT2(other_room, rev_dir[door])->last_player_interaction = time(0);
+      if (ch->in_room)
+        EXIT2(ch->in_room, door)->last_player_interaction = time(0);
+    }
     break;
   case SCMD_UNLOCK:
   case SCMD_LOCK:
@@ -1997,7 +2012,7 @@ ACMD(do_drag)
       return;
     }
 
-    if (!affected_by_spell(vict, SPELL_LEVITATE) && (int)((GET_STR(ch)*10) * 3/2) < (GET_WEIGHT(vict) + IS_CARRYING_W(vict))) {
+    if (!IS_AFFECTED(vict, AFF_LEVITATE) && (int)((GET_STR(ch)*10) * 3/2) < (GET_WEIGHT(vict) + IS_CARRYING_W(vict))) {
       act("$N is too heavy for you to drag!", FALSE, ch, 0, vict, TO_CHAR);
       return;
     }

@@ -50,7 +50,7 @@ extern void check_quest_destroy(struct char_data *ch, struct obj_data *obj);
 extern void dominator_mode_switch(struct char_data *ch, struct obj_data *obj, int mode);
 extern float get_bulletpants_weight(struct char_data *ch);
 extern int calculate_vehicle_weight(struct veh_data *veh);
-extern void die(struct char_data *ch, idnum_t cause_of_death_idnum);
+extern void die(struct char_data *ch, idnum_t cause_of_death_idnum, bool should_splatter_and_scream);
 extern bool obj_can_be_stowed(struct char_data *ch, struct obj_data *obj, bool send_messages);
 extern bool raw_stow_obj(struct char_data *ch, struct obj_data *obj, bool send_messages);
 
@@ -1424,9 +1424,27 @@ void get_from_container(struct char_data *ch, struct obj_data *cont,
 
 bool can_take_obj_from_room(struct char_data *ch, struct obj_data *obj)
 {
+  if (!ch) {
+    mudlog_vfprintf(ch, LOG_SYSLOG, "SYSERR: Got NULL parameter(s) to can_take_obj_from_room(%s, %s)", ch ? GET_CHAR_NAME(ch) : "NULL", GET_OBJ_NAME(obj) ? "obj" : "NULL");
+    return false;
+  }
+
   // Trace it back to its parent in case this is in a container etc.
   struct obj_data *superobj = obj;
   while (superobj->in_obj) superobj = superobj->in_obj;
+
+  // If it's arranged, you must be the apartment owner to take it. Don't block taking things from _inside_ an arranged object though.
+  if (obj->in_room
+      && IS_OBJ_STAT(obj, ITEM_EXTRA_ARRANGED)
+      && (!GET_APARTMENT(obj->in_room) || !GET_APARTMENT(obj->in_room)->has_owner_privs(ch)))
+  {
+    if (access_level(ch, LVL_ADMIN)) {
+      send_to_char(ch, "You bypass the arranged-object protection on %s.", GET_OBJ_NAME(obj));
+    } else {
+      send_to_char(ch, "Only the apartment's owner can pick up arranged items.");
+      return false;
+    }
+  }
 
 	if (GET_OBJ_TYPE(obj) == ITEM_DECK_ACCESSORY)
 	{
@@ -2381,90 +2399,75 @@ int perform_drop(struct char_data *ch, struct obj_data *obj, byte mode,
 		FALSE_CASE_PRINTF(mode != SCMD_DROP, "You can't %s vehicles.", sname);
 		FALSE_CASE(ch->in_veh, "You'll have to step out of your current vehicle to do that.");
 
-		// Load vehicles owned by the identified owner to reduce cases of stuck containers.
-		load_vehicles_for_idnum(GET_VEHCONTAINER_VEH_OWNER(obj));
+		struct veh_data *veh = resolve_vehicle_from_vehcontainer(obj);
 
-		// Find the veh storage room.
-		rnum_t vehicle_storage_rnum = real_room(RM_PORTABLE_VEHICLE_STORAGE);
-		if (vehicle_storage_rnum < 0)
-		{
-			send_to_char("Whoops-- looks like this system is offline!\r\n", ch);
-			mudlog("SYSERR: Got negative rnum when looking up RM_PORTABLE_VEHICLE_STORAGE!", ch, LOG_SYSLOG, TRUE);
-			return 0;
-		}
+    if (veh) {
+      // Found it! Validate preconditions.
+      
+      // It'd be great if we could allow drones and bikes to be dropped anywhere not flagged !BIKE, but this
+      // would cause issues with the current world-- the !bike flag is placed at entrances to zones, not
+      // spread throughout the whole thing. People would just carry their bikes in, drop them, and do drivebys.
+      bool can_be_dropped_here = FALSE;
+      if (ch->in_veh)
+      {
+        if (ch->in_veh->usedload + calculate_vehicle_entry_load(veh) > ch->in_veh->load)
+        {
+          send_to_char(ch, "%s won't fit in here.\r\n", CAP(GET_VEH_NAME_NOFORMAT(veh)));
+          return 0;
+        }
+        can_be_dropped_here = TRUE;
+      }
+      else if (ROOM_FLAGGED(in_room, ROOM_GARAGE) || ROOM_FLAGGED(in_room, ROOM_ALL_VEHICLE_ACCESS) || veh->damage >= VEH_DAM_THRESHOLD_DESTROYED)
+      {
+        can_be_dropped_here = TRUE;
+      }
+      else if (veh_can_traverse_land(veh) && ROOM_FLAGGED(in_room, ROOM_ROAD))
+      {
+        can_be_dropped_here = TRUE;
+      }
+      else if (veh_can_traverse_water(veh) && IS_WATER(in_room))
+      {
+        can_be_dropped_here = TRUE;
+      }
+      else if (veh_can_traverse_air(veh) && (ROOM_FLAGGED(in_room, ROOM_AIRCRAFT_CAN_DRIVE_HERE) || GET_ROOM_FLIGHT_CODE(in_room)))
+      {
+        can_be_dropped_here = TRUE;
+      }
 
-		// Search it for our vehicle.
-		for (struct veh_data *veh = world[vehicle_storage_rnum].vehicles; veh; veh = veh->next_veh)
-		{
-			if (GET_VEH_VNUM(veh) == GET_VEHCONTAINER_VEH_VNUM(obj) && veh->idnum == GET_VEHCONTAINER_VEH_IDNUM(obj) && veh->owner == GET_VEHCONTAINER_VEH_OWNER(obj))
-			{
-				// Found it! Validate preconditions.
+      if (!can_be_dropped_here)
+      {
+        // Exception: You can drop water vehicles on
+        send_to_char(ch, "%s can't be set down here.\r\n", CAP(GET_VEH_NAME_NOFORMAT(veh)));
+        return 0;
+      }
 
-				// It'd be great if we could allow drones and bikes to be dropped anywhere not flagged !BIKE, but this
-				// would cause issues with the current world-- the !bike flag is placed at entrances to zones, not
-				// spread throughout the whole thing. People would just carry their bikes in, drop them, and do drivebys.
-				bool can_be_dropped_here = FALSE;
-				if (ch->in_veh)
-				{
-					if (ch->in_veh->usedload + calculate_vehicle_entry_load(veh) > ch->in_veh->load)
-					{
-						send_to_char(ch, "%s won't fit in here.\r\n", CAP(GET_VEH_NAME_NOFORMAT(veh)));
-						return 0;
-					}
-					can_be_dropped_here = TRUE;
-				}
-				else if (ROOM_FLAGGED(in_room, ROOM_GARAGE) || ROOM_FLAGGED(in_room, ROOM_ALL_VEHICLE_ACCESS) || veh->damage >= VEH_DAM_THRESHOLD_DESTROYED)
-				{
-					can_be_dropped_here = TRUE;
-				}
-				else if (veh_can_traverse_land(veh) && ROOM_FLAGGED(in_room, ROOM_ROAD))
-				{
-					can_be_dropped_here = TRUE;
-				}
-				else if (veh_can_traverse_water(veh) && IS_WATER(in_room))
-				{
-					can_be_dropped_here = TRUE;
-				}
-				else if (veh_can_traverse_air(veh) && (ROOM_FLAGGED(in_room, ROOM_AIRCRAFT_CAN_DRIVE_HERE) || GET_ROOM_FLIGHT_CODE(in_room)))
-				{
-					can_be_dropped_here = TRUE;
-				}
+      // Proceed to drop.
+      veh_from_room(veh);
+      veh_to_room(veh, ch->in_room);
+      send_to_char(ch, "You set %s down with a sigh of relief.\r\n", GET_VEH_NAME(veh));
+      snprintf(buf, sizeof(buf), "$n sets %s down with a sigh of relief.", GET_VEH_NAME(veh));
+      act(buf, FALSE, ch, 0, 0, TO_ROOM);
 
-				if (!can_be_dropped_here)
-				{
-					// Exception: You can drop water vehicles on
-					send_to_char(ch, "%s can't be set down here.\r\n", CAP(GET_VEH_NAME_NOFORMAT(veh)));
-					return 0;
-				}
+      const char *owner = get_player_name(veh->owner);
+      snprintf(buf, sizeof(buf), "%s (%ld) dropped vehicle %s (%ld, idnum %ld) belonging to %s (%ld) in %s.",
+                GET_CHAR_NAME(ch),
+                GET_IDNUM(ch),
+                GET_VEH_NAME(veh),
+                GET_VEH_VNUM(veh),
+                veh->idnum,
+                owner,
+                veh->owner,
+                GET_ROOM_NAME(veh->in_room));
+      mudlog(buf, ch, LOG_CHEATLOG, TRUE);
+      DELETE_ARRAY_IF_EXTANT(owner);
 
-				// Proceed to drop.
-				veh_from_room(veh);
-				veh_to_room(veh, ch->in_room);
-				send_to_char(ch, "You set %s down with a sigh of relief.\r\n", GET_VEH_NAME(veh));
-				snprintf(buf, sizeof(buf), "$n sets %s down with a sigh of relief.", GET_VEH_NAME(veh));
-				act(buf, FALSE, ch, 0, 0, TO_ROOM);
+      // Clear the values to prevent bug logging, then remove the object from inventory.
+      GET_VEHCONTAINER_VEH_VNUM(obj) = GET_VEHCONTAINER_VEH_IDNUM(obj) = GET_VEHCONTAINER_VEH_OWNER(obj) = 0;
+      extract_obj(obj);
 
-				const char *owner = get_player_name(veh->owner);
-				snprintf(buf, sizeof(buf), "%s (%ld) dropped vehicle %s (%ld, idnum %ld) belonging to %s (%ld) in %s.",
-								 GET_CHAR_NAME(ch),
-								 GET_IDNUM(ch),
-								 GET_VEH_NAME(veh),
-								 GET_VEH_VNUM(veh),
-								 veh->idnum,
-								 owner,
-								 veh->owner,
-								 GET_ROOM_NAME(veh->in_room));
-				mudlog(buf, ch, LOG_CHEATLOG, TRUE);
-				DELETE_ARRAY_IF_EXTANT(owner);
-
-				// Clear the values to prevent bug logging, then remove the object from inventory.
-				GET_VEHCONTAINER_VEH_VNUM(obj) = GET_VEHCONTAINER_VEH_IDNUM(obj) = GET_VEHCONTAINER_VEH_OWNER(obj) = 0;
-				extract_obj(obj);
-
-				playerDB.SaveChar(ch);
-				save_single_vehicle(veh);
-				return 0;
-			}
+      playerDB.SaveChar(ch);
+      save_single_vehicle(veh);
+      return 0;
 		}
 
 		send_to_char(ch, "Error: we couldn't find a matching vehicle for %s! Please alert staff.\r\n", decapitalize_a_an(GET_OBJ_NAME(obj)));
@@ -3513,7 +3516,7 @@ ACMD(do_eat)
 	{
 		send_to_char(ch, "^RA sudden, crushing sense of disapproval hammers into you from all sides! You barely have time to scream before imploding into a tasty ball that %s promptly monches up. Turnabout is fair play?\r\n", GET_OBJ_NAME(food));
 		act("$n raises $p to $s mouth, then suddenly gives a piercing scream before imploding under Lucien's disapproval!", FALSE, ch, food, 0, TO_ROOM);
-		die(ch, GET_IDNUM(ch));
+		die(ch, GET_IDNUM(ch), true);
 		return;
 	}
 
@@ -3888,7 +3891,7 @@ int can_wield_both(struct char_data *ch, struct obj_data *one, struct obj_data *
 		return FALSE;
 	else if (!WEAPON_IS_GUN(one) && !WEAPON_IS_GUN(two))
 		return FALSE;
-	else if (IS_OBJ_STAT(one, ITEM_EXTRA_TWOHANDS) || IS_OBJ_STAT(two, ITEM_EXTRA_TWOHANDS))
+	else if (OBJ_REQUIRES_TWO_HANDS(one) || OBJ_REQUIRES_TWO_HANDS(two))
 		return FALSE;
 
 	return TRUE;
@@ -4038,7 +4041,7 @@ void perform_wear(struct char_data *ch, struct obj_data *obj, int where, bool pr
 				where++;
 	}
 
-	if ((where == WEAR_WIELD || where == WEAR_HOLD) && IS_OBJ_STAT(obj, ITEM_EXTRA_TWOHANDS) &&
+	if ((where == WEAR_WIELD || where == WEAR_HOLD) && OBJ_REQUIRES_TWO_HANDS(obj) &&
 			(GET_EQ(ch, WEAR_SHIELD) || GET_EQ(ch, WEAR_HOLD) || GET_EQ(ch, WEAR_WIELD)))
 	{
 		if (print_messages)
@@ -4094,14 +4097,14 @@ void perform_wear(struct char_data *ch, struct obj_data *obj, int where, bool pr
 		return;
 	}
 
-	if (GET_EQ(ch, WEAR_WIELD) && IS_OBJ_STAT(GET_EQ(ch, WEAR_WIELD), ITEM_EXTRA_TWOHANDS) &&
+	if (GET_EQ(ch, WEAR_WIELD) && OBJ_REQUIRES_TWO_HANDS(GET_EQ(ch, WEAR_WIELD)) &&
 			(where == WEAR_HOLD || where == WEAR_SHIELD))
 	{
 		if (print_messages)
 			act("$p requires two free hands.", FALSE, ch, GET_EQ(ch, WEAR_WIELD), 0, TO_CHAR);
 		return;
 	}
-	else if (GET_EQ(ch, WEAR_HOLD) && IS_OBJ_STAT(GET_EQ(ch, WEAR_HOLD), ITEM_EXTRA_TWOHANDS) &&
+	else if (GET_EQ(ch, WEAR_HOLD) && OBJ_REQUIRES_TWO_HANDS(GET_EQ(ch, WEAR_HOLD)) &&
 					 (where == WEAR_WIELD || where == WEAR_SHIELD))
 	{
 		if (print_messages)
@@ -5143,21 +5146,21 @@ int draw_from_readied_holster(struct char_data *ch, struct obj_data *holster)
 	}
 
 	// We're wielding a 2H item.
-	if (GET_EQ(ch, WEAR_WIELD) && IS_OBJ_STAT(GET_EQ(ch, WEAR_WIELD), ITEM_EXTRA_TWOHANDS))
+	if (GET_EQ(ch, WEAR_WIELD) && OBJ_REQUIRES_TWO_HANDS(GET_EQ(ch, WEAR_WIELD)))
 	{
 		act("Draw check: Skipping $p, wielding a 2H item already.", FALSE, ch, contents, 0, TO_ROLLS);
 		return 0;
 	}
 
 	// We're holding a 2H item.
-	if (GET_EQ(ch, WEAR_HOLD) && IS_OBJ_STAT(GET_EQ(ch, WEAR_HOLD), ITEM_EXTRA_TWOHANDS))
+	if (GET_EQ(ch, WEAR_HOLD) && OBJ_REQUIRES_TWO_HANDS(GET_EQ(ch, WEAR_HOLD)))
 	{
 		act("Draw check: Skipping $p, holding a 2H item already.", FALSE, ch, contents, 0, TO_ROLLS);
 		return 0;
 	}
 
 	// We're holding something and drawing a 2H item.
-	if ((GET_EQ(ch, WEAR_WIELD) || GET_EQ(ch, WEAR_HOLD) || GET_EQ(ch, WEAR_SHIELD)) && IS_OBJ_STAT(contents, ITEM_EXTRA_TWOHANDS))
+	if ((GET_EQ(ch, WEAR_WIELD) || GET_EQ(ch, WEAR_HOLD) || GET_EQ(ch, WEAR_SHIELD)) && OBJ_REQUIRES_TWO_HANDS(contents))
 	{
 		act("Draw check: Skipping $p, have something in hand and drawing 2H item.", FALSE, ch, contents, 0, TO_ROLLS);
 		return 0;
@@ -5509,9 +5512,9 @@ ACMD(do_holster)
 		obj_from_char(obj);
 	obj_to_obj(obj, cont);
 	send_to_char(ch, "You slip %s^n into %s^n%s.\r\n", GET_OBJ_NAME(obj), decapitalize_a_an(GET_OBJ_NAME(cont)),
-		         PRF_FLAGGED(ch, PRF_AUTOREADY) ? " and ready it for a quick draw" : "");
+		         !PRF_FLAGGED(ch, PRF_NO_AUTOREADY) ? " and ready it for a quick draw" : "");
 	act("$n slips $p into $P.", FALSE, ch, obj, cont, TO_ROOM);
-	GET_HOLSTER_READY_STATUS(cont) = PRF_FLAGGED(ch, PRF_AUTOREADY) ? 1 : 0;
+	GET_HOLSTER_READY_STATUS(cont) = (!PRF_FLAGGED(ch, PRF_NO_AUTOREADY)) ? 1 : 0;
 
 	set_dropped_by_info(obj, ch);
 
@@ -5616,11 +5619,9 @@ ACMD(do_ready)
 
 ACMD(do_draw)
 {
-	if (GET_EQ(ch, WEAR_WIELD) && (IS_OBJ_STAT(GET_EQ(ch, WEAR_WIELD), ITEM_EXTRA_TWOHANDS) || GET_EQ(ch, WEAR_HOLD)))
-	{
-		send_to_char(ch, "Your hands are full.\r\n");
-		return;
-	}
+  FAILURE_CASE_PRINTF(GET_EQ(ch, WEAR_WIELD) && OBJ_REQUIRES_TWO_HANDS(GET_EQ(ch, WEAR_WIELD)), "%s requires both hands.", decapitalize_a_an(GET_OBJ_NAME(GET_EQ(ch, WEAR_WIELD))));
+  FAILURE_CASE_PRINTF(GET_EQ(ch, WEAR_HOLD) && OBJ_REQUIRES_TWO_HANDS(GET_EQ(ch, WEAR_HOLD)), "%s requires both hands.", decapitalize_a_an(GET_OBJ_NAME(GET_EQ(ch, WEAR_HOLD))));
+  FAILURE_CASE(GET_EQ(ch, WEAR_WIELD) && GET_EQ(ch, WEAR_HOLD), "Your hands are full.");
 
 	skip_spaces(&argument);
 	if (*argument)

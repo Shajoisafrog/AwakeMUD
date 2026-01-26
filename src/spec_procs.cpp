@@ -44,7 +44,7 @@ extern struct spell_trainer spelltrainers[];
 /* extern functions */
 void add_follower(struct char_data * ch, struct char_data * leader);
 extern void docwagon(struct char_data *ch);
-extern void die(struct char_data * ch, idnum_t cause_of_death);
+extern void die(struct char_data * ch, idnum_t cause_of_death, bool should_splatter_and_scream);
 extern void affect_total(struct char_data * ch);
 extern struct obj_data *get_first_credstick(struct char_data *ch, const char *arg);
 extern struct char_data *give_find_vict(struct char_data * ch, char *arg);
@@ -70,6 +70,8 @@ extern bool deactivate_power(struct char_data *ch, int power);
 extern bool process_spotted_invis(struct char_data *ch, struct char_data *vict);
 extern void initialize_quest_for_ch(struct char_data *ch, int quest_rnum, struct char_data *johnson);
 
+extern bool can_hurt(struct char_data *ch, struct char_data *victim, int attacktype, bool include_func_protections);
+extern bool damage_without_message(struct char_data *ch, struct char_data *victim, int dam, int attacktype, bool is_physical);
 
 extern struct command_info cmd_info[];
 
@@ -3931,7 +3933,7 @@ SPECIAL(circulation_fan) {
               GET_ROOM_NAME(ch->in_room), GET_ROOM_VNUM(ch->in_room) );
       mudlog(buf, ch, LOG_DEATHLOG, TRUE);
 
-      die(ch, 0);
+      die(ch, 0, true);
 
       return true;
     } else if (!cmd) {
@@ -5100,7 +5102,7 @@ SPECIAL(floor_has_glass_shards) {
     return FALSE;
 
   // If they're safe from shards, we don't care what they do.
-  if (ch->in_veh || IS_NPC(ch) || IS_ASTRAL(ch) || PRF_FLAGGED(ch, PRF_NOHASSLE) || GET_EQ(ch, WEAR_FEET) || AFF_FLAGGED(ch, AFF_SNEAK) || get_spell_affected_successes(ch, SPELL_LEVITATE) > 0)
+  if (ch->in_veh || IS_NPC(ch) || IS_ASTRAL(ch) || PRF_FLAGGED(ch, PRF_NOHASSLE) || GET_EQ(ch, WEAR_FEET) || AFF_FLAGGED(ch, AFF_SNEAK) || !IS_AFFECTED(ch, AFF_LEVITATE) > 0)
     return FALSE;
 
   // Don't tear up people who are rigging.
@@ -7505,8 +7507,18 @@ SPECIAL(medical_workshop) {
 
     // Room is sterile (PGHQ feature)? Another -2.
     if (ROOM_FLAGGED(workshop->in_room, ROOM_STERILE)) {
-      target -= 2;
-      strlcat(buf, ", room is sterile so -2", sizeof(buf));
+      if (GET_APARTMENT(workshop->in_room)) {
+        // To get the benefit, the apartment must be owned with a valid lease, and you must be the owner or a guest.
+        if (GET_APARTMENT(workshop->in_room)->is_owner_or_guest_with_valid_lease(ch)) {
+          target -= 2;
+          strlcat(buf, ", room is sterile apartment so -2", sizeof(buf));
+        } else {
+          strlcat(buf, ", room is sterile apartment but you're not an owner or guest", sizeof(buf));
+        }
+      } else {
+        target -= 2;
+        strlcat(buf, ", room is sterile so -2", sizeof(buf));
+      }
     }
   }
 
@@ -8128,6 +8140,91 @@ SPECIAL(grenada_gatekeeper)
     }
   }
 
+  return FALSE;
+}
+
+SPECIAL(penance)
+{
+  if (!cmd)
+    return FALSE;
+
+  struct obj_data *obj = (struct obj_data *) me;
+  struct char_data *to = NULL;
+
+  // Check to make sure I'm being held by my user.
+  if (!ch || obj->worn_by != ch)
+    return FALSE;
+
+  // Point command.
+  if (CMD_IS("point")) {
+    // Must be YOUR Penance. Message sent in function.
+    if (blocked_by_soulbinding(ch, obj, TRUE)) {
+      return TRUE;
+    }
+
+    skip_spaces(&argument);
+    if (!*argument) {
+      send_to_char(ch, "Syntax for using Penance: POINT <victim>\r\n");
+      return TRUE;
+    }
+
+    if (ch->in_veh)
+      to = get_char_veh(ch, argument, ch->in_veh);
+    else
+      to = get_char_room_vis(ch, argument);
+
+    if (!to) {
+      send_to_char(ch, "You don't see anyone named '%s' here.\r\n", argument);
+      return TRUE;
+    }
+
+    if (to == ch) {
+      send_to_char(ch, "It'd be such a waste to use Penance on yourself.\r\n");
+      return TRUE;
+    }
+
+    if (ROOM_IS_PEACEFUL(get_ch_in_room(to))) {
+      send_to_char(ch, "It's just so peaceful here...\r\n");
+      return TRUE;
+    }
+
+    // No PK.
+    if (to->desc || !IS_NPC(to)) {
+      act("Penance strains eagerly in your hand as you point it at $N, but a snare of ^Rred^n light traps it in your hand. Seems it can't be used on $M.", FALSE, ch, obj, to, TO_CHAR);
+      act("$n points $p at you, but a snare of ^Rred^n light flares around the arrowhead in $s hand, preventing anything from happening.", FALSE, ch, obj, to, TO_VICT);
+      act("$n points $p at $N, but a snare of ^Rred^n light flares around the arrowhead in $s hand, preventing anything from happening.", FALSE, ch, obj, to, TO_NOTVICT);
+      return TRUE;
+    }
+
+    // Must be able to damage this target.
+    if (!can_hurt(ch, to, TYPE_PENANCE, TRUE)) {
+      act("Penance strains eagerly in your hand as you point it at $N, but a snare of ^oorange^n light traps it in your hand. Seems it can't be used on $M.", FALSE, ch, obj, to, TO_CHAR);
+      act("$n points $p at you, but a snare of ^oorange^n light flares around the arrowhead in $s hand, preventing anything from happening.", FALSE, ch, obj, to, TO_VICT);
+      act("$n points $p at $N, but a snare of ^oorange^n light flares around the arrowhead in $s hand, preventing anything from happening.", FALSE, ch, obj, to, TO_NOTVICT);
+      return TRUE;
+    }
+
+    // Log it.
+    mudlog_vfprintf(ch, LOG_CHEATLOG, "%s using holiday gift 'Penance' on mob %s (%ld).", GET_CHAR_NAME(ch), GET_CHAR_NAME(to), GET_MOB_VNUM(to));
+
+    // Message it.
+    act("The moment you point Penance at $N, it vanishes from your hand, disappearing into $N with impossible speed. Soundlessly and without fanfare, $E collapses.", FALSE, ch, obj, to, TO_CHAR);
+    act("$n points $p at you, and it vanishes from $s hand. You feel a wrenching sensation...", FALSE, ch, obj, to, TO_VICT);
+    act("$n points $p at $N, and it vanishes from $s hand, disappearing into $N with impossible speed. Soundlessly and without fanfare, $E collapses.", FALSE, ch, obj, to, TO_NOTVICT);
+
+    // Set them at the lowest possible health...
+    GET_PHYSICAL(to) = 1;
+    // Then blow them away, dealing up to 20 rounds of lethal damage.
+    for (int damage_rounds_limiter = 20; damage_rounds_limiter > 0 && !damage_without_message(ch, to, 10, TYPE_PENANCE, TRUE); damage_rounds_limiter--) {}
+    // Assume TO is dead now.
+    to = NULL;
+
+    // Extract Penance.
+    extract_obj(obj);
+
+    return TRUE;
+  }
+  
   return FALSE;
 }
 

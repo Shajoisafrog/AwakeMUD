@@ -745,7 +745,8 @@ struct preference_bit_struct preference_bits_v2[] = {
   { "No Follow"            , FALSE, TRUE  },
   { "No Prompt Change Message", FALSE, TRUE  },
   { "Passive Combat"       , FALSE, TRUE  },
-  { "Auto Ready"           , FALSE, TRUE  },
+  { "No Auto Ready"        , FALSE, TRUE  },
+  { "No Roundtime"         , FALSE, TRUE  },
   { "\n"                   , 0    , 0     }
 };
 
@@ -824,7 +825,8 @@ const char *preference_bits[] =
     "NOFOLLOW",
     "!PROMPT_CHANGE_MSG",
     "PASSIVE_COMBAT",
-    "AUTOREADY",
+    "!AUTOREADY",
+    "!ROUNDTIME",
     MAX_FLAG_MARKER
   };
 
@@ -1239,7 +1241,7 @@ const char *wear_bits[] =
   /* ITEM_WEAR_ (wear bitvector) */
 const char *wear_bits_for_pc_exdescs[] =
 {
-  "<invalid/take>",
+  "<Always Visible>",
   "fingers",
   "neck",
   "<invalid/body>",
@@ -1310,6 +1312,8 @@ const char *extra_bits[] =
     "CONCEALED_IN_EQ",
     "TRODE_NET",
     "OTAKU_RESONANCE",
+    "ARRANGED",
+    "INVERT_2H",
     MAX_FLAG_MARKER
   };
 
@@ -1352,6 +1356,8 @@ const char *pc_readable_extra_bits[] =
     "Concealed in Equipment",
     "Is Electrode Net",
     "Is Virtual Otaku Item",
+    "Is Arranged",
+    "2h/1h Inverted",
     MAX_FLAG_MARKER
   };
 
@@ -1395,47 +1401,62 @@ const char *apply_types[] =
 
 struct program_data programs[] =
   {
-    {"None", 0 },
-    {"Bod", 3 },
-    {"Evasion", 3 },
-    {"Masking", 2 },
-    {"Sensor", 2 },
-    {"Attack", 1 },
-    {"Slow", 4 },
-    {"Medic", 4 },
-    {"Snooper", 2 },
-    {"BattleTac", 5 },
-    {"Compressor", 2 },
-    {"Analyze", 3 },
-    {"Decrypt", 1 },
-    {"Deception", 2 },
-    {"Relocate", 2 },
-    {"Sleaze", 3 },
-    {"Scanner", 3 },
-    {"Browse", 1 },
-    {"Read/Write", 2 },
-    {"Track", 8 },
-    {"Armor", 3 },
-    {"Camo", 3 },
-    {"Crash", 3 },
-    {"Defuse", 2 },
-    {"Evaluate", 2 },
-    {"Validate", 4 },
-    {"Swerve", 3 },
-    {"Programming Suite", 15 },
-    {"Commlink", 1 },
-    {"Cloak", 3 },
-    {"Lock-On", 3  },
-    {"Cold ASIST Interface", 2 },
-    {"Hot ASIST Interface", 4 },
-    {"Hardening", 8 },
-    {"ICCM Filter", 4 },
-    {"Icon Chip", 2 },
-    {"MPCP", 8 },
-    {"Reality Filter", 10 },
-    {"Response Increase", 1 },
-    {"Shield", 4},
-    {"Radio Link", 1}
+    {"None", 0, FALSE },
+    {"Bod", 3, FALSE },
+    {"Evasion", 3, FALSE },
+    {"Masking", 2, FALSE },
+    {"Sensor", 2, FALSE },
+    {"Attack", 1, FALSE },
+    {"Slow", 4, FALSE },
+    {"Medic", 4, FALSE },
+    {"Snooper", 2, FALSE },
+    {"BattleTac", 5, FALSE },
+    {"Compressor", 2, FALSE },
+    {"Analyze", 3, FALSE },
+    {"Decrypt", 1, FALSE },
+    {"Deception", 2, FALSE },
+    {"Relocate", 2, FALSE },
+    {"Sleaze", 3, FALSE },
+    {"Scanner", 3, FALSE },
+    {"Browse", 1, FALSE },
+    {"Read/Write", 2, FALSE },
+    {"Track", 8, FALSE },
+    {"Armor", 3, FALSE },
+    {"Camo", 3, FALSE },
+    {"Crash", 3, FALSE },
+    {"Defuse", 2, FALSE },
+    {"Evaluate", 2, FALSE },
+    {"Validate", 4, FALSE },
+    {"Swerve", 3, FALSE },
+    {"Programming Suite", 15, FALSE },
+    {"Commlink", 1, FALSE },
+    {"Cloak", 3, FALSE },
+    {"Lock-On", 3 , FALSE },
+    {"Cold ASIST Interface", 2, FALSE },
+    {"Hot ASIST Interface", 4, FALSE },
+    {"Hardening", 8, FALSE },
+    {"ICCM Filter", 4, FALSE },
+    {"Icon Chip", 2, FALSE },
+    {"MPCP", 8, FALSE },
+    {"Reality Filter", 10, FALSE },
+    {"Response Increase", 1, FALSE },
+    {"Shield", 4, FALSE },
+    {"Radio Link", 1, FALSE },
+    {"Doorstop", 2, TRUE },
+    {"Mirrors", 3, TRUE },
+    {"Purge", 2, TRUE },
+    {"Redecorate", 2, TRUE },
+    {"Spoof", 3, TRUE },
+    {"Triangulation", 2, TRUE },
+    {"Counterfeit", 10, TRUE },
+    {"Guardian", 2, TRUE },
+    {"Remote Control", 3, TRUE },
+    {"Black Hammer", 20, TRUE },
+    {"Erosion", 3, TRUE },
+    {"Hog", 3, TRUE },
+    {"Killjoy", 10, TRUE },
+    {"Steamroller", 3, TRUE },
+    {"Restore", 3, TRUE }
   };
 
 int attack_multiplier[] = { 0, 2, 3, 4, 5 };
@@ -2411,7 +2432,7 @@ const char *short_attributes[] =
 
 struct spell_types spells[] =
   {
-    // name, category, vector, target, duration, drainpower, draindamage
+    // name, physical, vector, target, duration, drainpower, draindamage, nerps
     { "UNDEF", 0, 0, 0, 0, 0, 0, 0 },
     { "Death Touch", FALSE, COMBAT, TOUCH, ATT_WIL, INSTANT, 0, PACK_VARIABLE_DRAIN_DAMAGE(-1) }, // 1
     { "Manabolt", FALSE, COMBAT, SINGLE, ATT_WIL, INSTANT, 0, PACK_VARIABLE_DRAIN_DAMAGE(0) },
@@ -2481,7 +2502,9 @@ struct spell_types spells[] =
     { "Nightvision", TRUE, DETECTION, SINGLE, -1, SUSTAINED, 1, LIGHT },
     { "Infravision", TRUE, DETECTION, SINGLE, -1, SUSTAINED, 1, MODERATE },
     { "Levitate", TRUE, MANIPULATION, SINGLE, -1, SUSTAINED, 2, MODERATE },
-    { "Flame Aura", TRUE, MANIPULATION, SINGLE, -1, SUSTAINED, 2, MODERATE }
+    { "Flame Aura", TRUE, MANIPULATION, SINGLE, -1, SUSTAINED, 2, MODERATE },
+    { "Analyze Magic", FALSE, DETECTION, SINGLE, 0, SUSTAINED, 0, LIGHT },
+    { "Catalog", FALSE, DETECTION, SINGLE, -6, SUSTAINED, 1, MODERATE }
   };
 
 const char *totem_types[] =
@@ -2953,7 +2976,8 @@ const char *metamagic[] = {
   "Quickening",
   "Reflecting",
   "Shielding",
-  "Anchoring"
+  "Anchoring",
+  "Divining"
 };
 
 struct otaku_echo echoes[] = {
@@ -3055,6 +3079,7 @@ const char *combat_modifiers[] =
   "Vehicle Handling",
   "Non-Weapon",
   "Riot Shield",
+  "Handedness Change",
   "ERROR"
 };
 

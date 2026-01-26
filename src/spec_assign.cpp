@@ -33,6 +33,9 @@ struct train_data trainers[] = {
                        { 60500, TBOD | TQUI | TSTR | TCHA | TINT | TWIL, 1 },
                        { 17104, TBOD | TQUI | TSTR, 0 },
                        { 9413, TCHA | TINT | TWIL, 0 },
+#ifdef USE_PRIVATE_CE_WORLD
+                       {102834, TCHA | TINT | TWIL, 0 },
+#endif
                        { 0, 0, 0 } /* this MUST be last */
                      };
 
@@ -108,6 +111,11 @@ struct teach_data teachers[] = {
     "After hours of study and physical practice, you feel like you've learned\r\nsomething.\r\n", ADVANCED },
   { 100976, { SKILL_ATHLETICS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
     "After hours of study and physical practice, you feel like you've learned\r\nsomething.\r\n", ADVANCED },
+
+  { 102893, { SKILL_CONJURING, SKILL_AURA_READING, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    "After hours of study and magical practice, you feel like you've learned something.\r\n", AMATEUR },
+  { 102894, { SKILL_SORCERY, SKILL_SPELLDESIGN, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  "After hours of study and magical practice, you feel like you've learned something.\r\n", AMATEUR },
 #endif
 
                        { 2508, { SKILL_BIOTECH, SKILL_MEDICINE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }, "After hours of medical research and instruction, you begin "
@@ -931,6 +939,7 @@ void assign_objects(void)
   SPECIAL(one_shot_self_heal);
   SPECIAL(holiday_gift);
   SPECIAL(slot_machine);
+  SPECIAL(penance);
 
   ASSIGNOBJ(OBJ_HOLIDAY_GIFT, holiday_gift);
   ASSIGNOBJ(OBJ_ONE_SHOT_HEALING_INJECTOR, one_shot_self_heal);
@@ -1026,6 +1035,7 @@ void assign_objects(void)
   ASSIGNOBJ(95839, trideo);
   ASSIGNOBJ(98002, bank); // CAS ATM
   ASSIGNOBJ(100690, bank); // CAS ATM
+  ASSIGNOBJ(103201, vending_machine); // Cedar River
 
   // Pluto's assigns
   ASSIGNOBJ(96521, pocket_sec);
@@ -1038,6 +1048,9 @@ void assign_objects(void)
   // Slots
   ASSIGNOBJ(39920, slot_machine);
   ASSIGNOBJ(62361, slot_machine);
+
+  // Gifts
+  ASSIGNOBJ(193, penance);
 
   perform_secret_obj_assignments();
 #endif

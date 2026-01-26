@@ -196,6 +196,7 @@ char * format_for_logging__returns_new(const char *input);
 int    calculate_ware_essence_or_index_cost(struct char_data *ch, struct obj_data *ware);
 bool   check_if_sitting_and_force_sit_command_if_not(struct char_data *ch);
 const char *cleanup_invalid_color_codes(const char *str);
+struct veh_data *resolve_vehicle_from_vehcontainer(struct obj_data *obj);
 
 // GMCP / Discord update method. Does nothing if GMCP isn't turned on.
 void update_gmcp_discord_info(struct descriptor_data *desc);
@@ -423,9 +424,10 @@ bool    update_pos(struct char_data *victim, bool protect_spells_from_purge=0);
 
 #define GET_PROJECTION_ESSLOSS_TICK(ch)  ((ch)->points.projection_ticks)
 
-#define RACE_IS_GHOUL(race)  ((race) >= RACE_GHOUL_HUMAN && (race) <= RACE_GHOUL_TROLL)
-#define RACE_IS_DRAKE(race)  ((race) >= RACE_DRAKE_HUMAN && (race) <= RACE_DRAKE_TROLL)
-#define RACE_IS_DRAGON(race) ((race) >= RACE_WESTERN_DRAGON && (race) <= RACE_FEATHERED_SERPENT)
+#define RACE_IS_GHOUL(race)       ((race) >= RACE_GHOUL_HUMAN && (race) <= RACE_GHOUL_TROLL)
+#define RACE_IS_DRAKE(race)       ((race) >= RACE_DRAKE_HUMAN && (race) <= RACE_DRAKE_TROLL)
+#define RACE_IS_DRAGON(race)      ((race) >= RACE_WESTERN_DRAGON && (race) <= RACE_FEATHERED_SERPENT)
+#define RACE_IS_TROLL_SIZED(race) ((race) == RACE_TROLL || (race) == RACE_CYCLOPS || (race) == RACE_FOMORI || (race) == RACE_GIANT || (race) == RACE_MINOTAUR || (race) == RACE_GHOUL_TROLL || (race) == RACE_DRAKE_TROLL)
 
 #define IS_GHOUL(ch)  (RACE_IS_GHOUL(GET_RACE(ch)))
 #define IS_DRAKE(ch)  (RACE_IS_DRAKE(GET_RACE(ch)))
@@ -842,13 +844,33 @@ bool _mob_is_alert(struct char_data *npc);
 #define GET_NUYEN_INCOME_THIS_PLAY_SESSION(ch, i)  (ch->desc->nuyen_income_this_play_session[i])
 /* descriptor-based utils ************************************************/
 
-#define WAIT_STATE(ch, cycle) ({ \
-        if ((ch)->desc) { \
-          if (GET_LEVEL(ch) <= 1) { (ch)->desc->wait = (cycle); } else { send_to_char((ch), "^L(Skipping wait state of %d ticks: Staff.)^n\r\n", cycle); } \
-        } else if (IS_NPC(ch)) { \
-          GET_MOB_WAIT(ch) = (cycle); \
-        }  \
+#ifndef IS_BUILDPORT
+#define WAIT_STATE(ch, cycle) ({                                                                        \
+        if ((ch)->desc) {                                                                               \
+          if (GET_LEVEL(ch) > 1) {                                                                      \
+            send_to_char((ch), "^L(Skipping wait state of %d ticks: Staff on mainport.)^n\r\n", cycle); \
+          } else {                                                                                      \
+            (ch)->desc->wait = (cycle);                                                                 \
+            if (!PRF_FLAGGED((ch), PRF_NOROUNDTIME)) {                                                  \
+              send_to_char((ch), "^L(Entering round time of %d ticks)^n\r\n", cycle);                   \
+            }                                                                                           \
+          }                                                                                             \
+        } else if (IS_NPC(ch)) {                                                                        \
+          GET_MOB_WAIT(ch) = (cycle);                                                                   \
+        }                                                                                               \
       })
+#else
+#define WAIT_STATE(ch, cycle) ({                                                                        \
+        if ((ch)->desc) {                                                                               \
+          (ch)->desc->wait = (cycle);                                                                   \
+          if (!PRF_FLAGGED((ch), PRF_NOROUNDTIME)) {                                                    \
+            send_to_char((ch), "^L(Entering round time of %d ticks)^n\r\n", cycle);                     \
+          }                                                                                             \
+        } else if (IS_NPC(ch)) {                                                                        \
+          GET_MOB_WAIT(ch) = (cycle);                                                                   \
+        }                                                                                               \
+      })
+#endif
 
 #define CHECK_WAIT(ch)        (((ch)->desc) ? ((ch)->desc->wait >= 1) : 0)
 #define STATE(d)                    ((d)->connected)
@@ -903,6 +925,7 @@ float get_proto_weight(struct obj_data *obj);
 #define GET_OBJ_CONTENTS(obj)  (GET_OBJ_TYPE((obj)) != ITEM_PART ? (obj)->contains : NULL)
 
 #define CAN_WEAR(obj, part) ((obj)->obj_flags.wear_flags.IsSet((part)))
+#define OBJ_REQUIRES_TWO_HANDS(obj) (IS_OBJ_STAT(obj, ITEM_EXTRA_TWOHANDS) != IS_OBJ_STAT(obj, ITEM_EXTRA_INVERT_TWOHANDED))
 
 #define IS_WEAPON(type) (((type) >= TYPE_HIT) && ((type) < TYPE_SUFFERING))
 

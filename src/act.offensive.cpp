@@ -35,7 +35,7 @@ extern int convert_look[];
 extern const char *KILLER_FLAG_MESSAGE;
 
 /* extern functions */
-void raw_kill(struct char_data * ch, idnum_t cause_of_death_idnum);
+void raw_kill(struct char_data * ch, idnum_t cause_of_death_idnum, bool should_splatter_and_scream);
 extern void range_combat(struct char_data *ch, char target[MAX_INPUT_LENGTH],
                            struct obj_data *weapon, int range, int dir);
 extern int find_weapon_range(struct char_data *ch, struct obj_data *weapon);
@@ -366,7 +366,7 @@ bool perform_hit(struct char_data *ch, char *argument, const char *cmdname)
     return TRUE;
   }
   if (vict == ch) {
-    send_to_char("You hit yourself...OUCH!.\r\n", ch);
+    send_to_char("You hit yourself...OUCH!  (Maybe you need to use a PREFIX?)\r\n", ch);
     act("$n hits $mself, and says OUCH!", FALSE, ch, 0, vict, TO_ROOM);
   }
   else {
@@ -469,7 +469,7 @@ ACMD(do_kill)
         mudlog(buf2, vict, LOG_DEATHLOG, TRUE);
       }
 
-      raw_kill(vict, GET_IDNUM(ch));
+      raw_kill(vict, GET_IDNUM(ch), true);
     }
   }
 }
@@ -1135,4 +1135,66 @@ ACMD(do_prone)
     }
     */
   }
+}
+
+// Swaps handedness on a weapon.
+ACMD(do_adjust) {
+  FAILURE_CASE(IS_ASTRAL(ch), "You can't seem to touch physical objects.");
+  FAILURE_CASE(!GET_EQ(ch, WEAR_WIELD) || GET_OBJ_TYPE(GET_EQ(ch, WEAR_WIELD)) != ITEM_WEAPON, "You must be wielding a weapon to adjust your grip on it.");
+
+  struct obj_data *weap = GET_EQ(ch, WEAR_WIELD);
+  struct obj_data *offhand = GET_EQ(ch, WEAR_HOLD);
+
+  if (WEAPON_IS_GUN(weap)) {
+    // No change to 1-handed weapons.
+    FAILURE_CASE_PRINTF(!IS_OBJ_STAT(weap, ITEM_EXTRA_TWOHANDS), "You can only adjust your grip on melee weapons and two-handed firearms.");
+
+    // It's possible to wield a large firearm with 1 hand, but you take a penalty unless you're a troll or troll metatype.
+    if (IS_OBJ_STAT(weap, ITEM_EXTRA_INVERT_TWOHANDED)) {
+      FAILURE_CASE(offhand, "You need both hands free to do that.");
+      send_to_char(ch, "You take %s into both hands%s.\r\n",
+                   decapitalize_a_an(GET_OBJ_NAME(weap)),
+                   RACE_IS_TROLL_SIZED(GET_RACE(ch)) ? "" : ", gaining full control of the weapon");
+      act("$n shifts $s grip on $p, taking it into both hands.", TRUE, ch, weap, 0, TO_ROOM);
+    } else {
+      send_to_char(ch, "You adjust your grip to use %s one-handed.%s\r\n",
+                   decapitalize_a_an(GET_OBJ_NAME(weap)),
+                   RACE_IS_TROLL_SIZED(GET_RACE(ch)) ? "" : " It'll be harder to shoot this way, but the free hand can be valuable.");
+      act("$n shifts $p into one hand, freeing up the other.", TRUE, ch, weap, 0, TO_ROOM);
+    }
+    // fall through
+  }
+  
+  // Melee weapons.
+  else {
+    // It's possible to use a 2-handed melee weapon with 1 hand, but it will give a penalty, even if you're a troll.
+    if (IS_OBJ_STAT(weap, ITEM_EXTRA_TWOHANDS)) {
+      if (IS_OBJ_STAT(weap, ITEM_EXTRA_INVERT_TWOHANDED)) {
+        FAILURE_CASE(offhand, "You need both hands free to do that.");
+        send_to_char(ch, "You take %s into both hands, gaining full control of the weapon.\r\n", decapitalize_a_an(GET_OBJ_NAME(weap)));
+        act("$n shifts $s grip on $p, taking it into both hands.", TRUE, ch, weap, 0, TO_ROOM);
+      } else {
+        send_to_char(ch, "You adjust your grip to use %s one-handed. It'll be harder to wield this way, but the free hand can be valuable.\r\n", decapitalize_a_an(GET_OBJ_NAME(weap)));
+        act("$n shifts $p into one hand, freeing up the other.", TRUE, ch, weap, 0, TO_ROOM);
+      }
+    }
+
+    // It's possible to use a 1-handed melee weapon with 2 hands, but it has to be reasonable for it to be grasped this way. We check for 1+ reach to simulate this.
+    else {
+      FAILURE_CASE_PRINTF(GET_WEAPON_REACH(weap) < 1, "%s doesn't have a long-enough handle to be gripped that way.", CAP(GET_OBJ_NAME(weap)));
+
+      if (IS_OBJ_STAT(weap, ITEM_EXTRA_INVERT_TWOHANDED)) {
+        send_to_char(ch, "You adjust your grip to use %s in its normal one-handed style.\r\n", decapitalize_a_an(GET_OBJ_NAME(weap)));
+        act("$n shifts $p into one hand, freeing up the other.", TRUE, ch, weap, 0, TO_ROOM);
+      } else {
+        FAILURE_CASE(offhand, "You need both hands free to do that.");
+        send_to_char(ch, "You take %s into both hands, gaining extra control of the weapon.\r\n", decapitalize_a_an(GET_OBJ_NAME(weap)));
+        act("$n shifts $s grip on $p, taking it into both hands.", TRUE, ch, weap, 0, TO_ROOM);
+      }
+    }
+    // fall through
+  }
+
+  GET_OBJ_EXTRA(weap).ToggleBit(ITEM_EXTRA_INVERT_TWOHANDED);
+  return;
 }

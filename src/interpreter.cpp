@@ -139,12 +139,14 @@ ACMD_DECLARE(do_olcon);
 ACMD_DECLARE(do_abilityset);
 ACMD_DECLARE(do_accept);
 ACMD_DECLARE(do_account);
+ACMD_DECLARE(do_adjust);
 ACMD_DECLARE(do_action);
 ACMD_DECLARE(do_activate);
 ACMD_DECLARE(do_advance);
 ACMD_DECLARE(do_afk);
 ACMD_DECLARE(do_alias);
 ACMD_DECLARE(do_ammo);
+ACMD_DECLARE(do_arrange);
 ACMD_DECLARE(do_assist);
 ACMD_DECLARE(do_ask);
 ACMD_DECLARE(do_astral);
@@ -291,6 +293,7 @@ ACMD_DECLARE(do_link);
 ACMD_DECLARE(do_look);
 ACMD_DECLARE(do_look_while_rigging);
 ACMD_DECLARE(do_logwatch);
+ACMD_DECLARE(do_logoff_simple);
 ACMD_DECLARE(do_manifest);
 ACMD_DECLARE(do_map);
 ACMD_DECLARE(do_masking);
@@ -555,9 +558,11 @@ struct command_info cmd_info[] =
 #else
     { "addpoint"   , POS_DEAD    , do_initiate , 0, SCMD_POWERPOINT, BLOCKS_IDLE_REWARD },
 #endif
-    { "affects"    , POS_MORTALLYW, do_status   , 0, 0, ALLOWS_IDLE_REWARD },
+    { "adjust"     , POS_LYING   , do_adjust   , 0, 0, BLOCKS_IDLE_REWARD },
+    { "affects"    , POS_MORTALLYW, do_status  , 0, 0, ALLOWS_IDLE_REWARD },
     { "afk"        , POS_DEAD    , do_afk      , 0, 0, ALLOWS_IDLE_REWARD },
     { "ammo"       , POS_LYING   , do_ammo     , 0, 0, ALLOWS_IDLE_REWARD },
+    { "arrange"    , POS_LYING   , do_arrange  , 0, 0, BLOCKS_IDLE_REWARD },
     { "assense"    , POS_LYING   , do_assense  , 0, 0, BLOCKS_IDLE_REWARD },
     { "at"         , POS_DEAD    , do_at       , LVL_ADMIN, 0, BLOCKS_IDLE_REWARD },
     { "attach"     , POS_RESTING , do_attach   , 0, 0, BLOCKS_IDLE_REWARD },
@@ -783,6 +788,7 @@ struct command_info cmd_info[] =
     { "lock"       , POS_SITTING , do_gen_door , 0, SCMD_LOCK, BLOCKS_IDLE_REWARD },
     { "load"       , POS_RESTING , do_chipload , 0, 0, BLOCKS_IDLE_REWARD },
     { "logwatch"   , POS_DEAD    , do_logwatch , LVL_BUILDER, 0, BLOCKS_IDLE_REWARD },
+    { "logoff"     , POS_DEAD    , do_logoff_simple , 0, 0, BLOCKS_IDLE_REWARD },
 
     { "man"        , POS_SITTING , do_man      , 0, 0, BLOCKS_IDLE_REWARD },
     { "manifest"   , POS_RESTING , do_manifest , 0, 0, BLOCKS_IDLE_REWARD },
@@ -2809,36 +2815,7 @@ int perform_dupe_check(struct descriptor_data *d)
       clear_hitcher(d->character, TRUE);
     }
     // now delete all the editing struct
-    if (d->edit_obj)
-      Mem->DeleteObject(d->edit_obj);
-    d->edit_obj = NULL;
-
-    if (d->edit_room)
-      Mem->DeleteRoom(d->edit_room);
-    d->edit_room = NULL;
-
-    if (d->edit_mob)
-      Mem->DeleteCh(d->edit_mob);
-    d->edit_mob = NULL;
-
-    if (d->edit_shop) {
-      free_shop(d->edit_shop);
-      DELETE_AND_NULL(d->edit_shop);
-    }
-
-    if (d->edit_quest) {
-      free_quest(d->edit_quest);
-      DELETE_AND_NULL(d->edit_quest);
-    }
-
-    DELETE_IF_EXTANT(d->edit_zon);
-
-    DELETE_IF_EXTANT(d->edit_cmd);
-
-    if (d->edit_veh)
-      Mem->DeleteVehicle(d->edit_veh);
-    d->edit_veh = NULL;
-
+    free_editing_structs(d, STATE(d));
     break;
   case UNSWITCH:
     SEND_TO_Q("Reconnecting to unswitched char.", d);
@@ -4146,3 +4123,7 @@ int fix_common_command_fuckups(const char *arg, struct command_info *cmd_info) {
   return -1;
 }
 #undef MAP_TYPO
+
+ACMD(do_logoff_simple) {
+  send_to_char(ch, "That command isn't valid outside of the Matrix. Did you mean to QUIT the game?\r\n");
+}

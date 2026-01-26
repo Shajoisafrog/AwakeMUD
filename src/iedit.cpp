@@ -261,7 +261,7 @@ void iedit_disp_firemodes_menu(struct descriptor_data *d)
   CLS(CH);
   for (int y = MODE_SS; y <= MODE_FA; y++)
     send_to_char(CH, "  %d) %s\r\n", y, fire_mode[y]);
-  sprintbit(GET_OBJ_VAL(OBJ, 10), fire_mode, buf1, sizeof(buf1));
+  sprintbit(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), fire_mode, buf1, sizeof(buf1));
   send_to_char(CH, "Set Options: ^c%s^n\r\nEnter options (0 to quit): ", buf1);
 }
 
@@ -1386,33 +1386,33 @@ void iedit_disp_menu(struct descriptor_data * d)
     
     if (WEAPON_IS_GUN(OBJ)) {
       WEAPCLAMP(OBJ, GET_WEAPON_MAX_AMMO, max_ammo, "max ammo");
-      if (IS_SET(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), MODE_SS) && !kosher_weapon_values[GET_OBJ_VAL(OBJ, 3)].can_ss) {
-        send_to_char(CH, "Single-shot firemode not allowed for this weapon type.\r\n");
-        REMOVE_BIT(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), MODE_SS);
+      if (WEAPON_CAN_USE_FIREMODE(OBJ, MODE_SS) && !kosher_weapon_values[GET_OBJ_VAL(OBJ, 3)].can_ss) {
+        send_to_char(CH, "^RSingle-shot firemode not allowed for this weapon type.^n\r\n");
+        REMOVE_BIT(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), 1 << MODE_SS);
       }
-      if (IS_SET(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), MODE_SA) && !kosher_weapon_values[GET_OBJ_VAL(OBJ, 3)].can_sa) {
-        send_to_char(CH, "Semi-auto firemode not allowed for this weapon type.\r\n");
-        REMOVE_BIT(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), MODE_SA);
+      if (WEAPON_CAN_USE_FIREMODE(OBJ, MODE_SA) && !kosher_weapon_values[GET_OBJ_VAL(OBJ, 3)].can_sa) {
+        send_to_char(CH, "^RSemi-auto firemode not allowed for this weapon type.^n\r\n");
+        REMOVE_BIT(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), 1 << MODE_SA);
       }
-      if (IS_SET(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), MODE_BF) && !kosher_weapon_values[GET_OBJ_VAL(OBJ, 3)].can_bf) {
-        send_to_char(CH, "Burst firemode not allowed for this weapon type.\r\n");
-        REMOVE_BIT(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), MODE_BF);
+      if (WEAPON_CAN_USE_FIREMODE(OBJ, MODE_BF) && !kosher_weapon_values[GET_OBJ_VAL(OBJ, 3)].can_bf) {
+        send_to_char(CH, "^RBurst firemode not allowed for this weapon type.^n\r\n");
+        REMOVE_BIT(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), 1 << MODE_BF);
       }
-      if (IS_SET(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), MODE_FA) && !kosher_weapon_values[GET_OBJ_VAL(OBJ, 3)].can_fa) {
-        send_to_char(CH, "Full-auto firemode not allowed for this weapon type.\r\n");
-        REMOVE_BIT(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), MODE_FA);
+      if (WEAPON_CAN_USE_FIREMODE(OBJ, MODE_FA) && !kosher_weapon_values[GET_OBJ_VAL(OBJ, 3)].can_fa) {
+        send_to_char(CH, "^RFull-auto firemode not allowed for this weapon type.^n\r\n");
+        REMOVE_BIT(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), 1 << MODE_FA);
       }
       WEAPCLAMP(OBJ, GET_WEAPON_INTEGRAL_RECOIL_COMP, recoil_comp, "recoil comp");
       if (GET_WEAPON_ATTACH_UNDER_VNUM(OBJ) > -1 && !kosher_weapon_values[GET_OBJ_VAL(OBJ, 3)].can_attach_bottom) {
-        send_to_char(CH, "Bottom attachment not allowed for this weapon type.\r\n");
+        send_to_char(CH, "^RBottom attachment not allowed for this weapon type.^n\r\n");
         GET_WEAPON_ATTACH_UNDER_VNUM(OBJ) = -1;
       }
       if (GET_WEAPON_ATTACH_BARREL_VNUM(OBJ) > -1 && !kosher_weapon_values[GET_OBJ_VAL(OBJ, 3)].can_attach_barrel) {
-        send_to_char(CH, "Barrel attachment not allowed for this weapon type.\r\n");
+        send_to_char(CH, "^RBarrel attachment not allowed for this weapon type.^n\r\n");
         GET_WEAPON_ATTACH_BARREL_VNUM(OBJ) = -1;
       }
       if (GET_WEAPON_ATTACH_TOP_VNUM(OBJ) > -1 && !kosher_weapon_values[GET_OBJ_VAL(OBJ, 3)].can_attach_top) {
-        send_to_char(CH, "Top attachment not allowed for this weapon type.\r\n");
+        send_to_char(CH, "^RTop attachment not allowed for this weapon type.^n\r\n");
         GET_WEAPON_ATTACH_TOP_VNUM(OBJ) = -1;
       }
     } else {
@@ -1512,9 +1512,7 @@ void iedit_parse(struct descriptor_data * d, const char *arg)
         case 'N':
           STATE(d) = CON_PLAYING;
           /* free up the editing object */
-          if (d->edit_obj)
-            Mem->DeleteObject(d->edit_obj);
-          d->edit_obj = NULL;
+          free_editing_structs(d, STATE(d));
           d->edit_number = 0;
           PLR_FLAGS(d->character).RemoveBit(PLR_EDITING);
           break;
@@ -1705,9 +1703,7 @@ void iedit_parse(struct descriptor_data * d, const char *arg)
           STATE(d) = CON_PLAYING;
           /* free up the editing object. free_obj *is* safe since
            it checks against prototype table */
-          if (d->edit_obj)
-            Mem->DeleteObject(d->edit_obj);
-          d->edit_obj = NULL;
+          free_editing_structs(d, STATE(d));
           d->edit_number = 0;
           PLR_FLAGS(d->character).RemoveBit(PLR_EDITING);
           break;
@@ -1977,6 +1973,9 @@ void iedit_parse(struct descriptor_data * d, const char *arg)
         iedit_disp_extra_menu(d);
       } else if (number == ITEM_EXTRA_KEPT + 1) {
         send_to_char("You can't set the Kept flag, it's only settable by code.\r\n", d->character);
+        iedit_disp_extra_menu(d);
+      } else if (number == ITEM_EXTRA_INVERT_TWOHANDED + 1) {
+        send_to_char("You can't set the Invert flag, it's only settable by code.\r\n", d->character);
         iedit_disp_extra_menu(d);
       } else {
         /* if 0, quit */
@@ -2988,7 +2987,7 @@ void iedit_parse(struct descriptor_data * d, const char *arg)
             iedit_disp_val12_menu(d);
             return;
           }
-          TOGGLE_BIT(GET_OBJ_VAL(OBJ, 10), 1 << number);
+          TOGGLE_BIT(GET_WEAPON_POSSIBLE_FIREMODES(OBJ), 1 << number);
           iedit_disp_firemodes_menu(d);
           return;
         default:
